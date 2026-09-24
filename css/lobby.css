@@ -1,1 +1,139 @@
-/* Task 8-12 填充 */
+/* css/lobby.css — 大厅样式（源 pages/lobby/lobby.wxss 移植，rpx→px÷2，scoped 到 #view-lobby；Web 单机专用，去掉房间码/二维码） */
+#view-lobby {
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+}
+#view-lobby > * {
+  width: min(560px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0 20px;
+}
+
+#view-lobby .lobby-container {
+  padding: 16px 0 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#view-lobby .lobby-title {
+  text-align: center;
+  color: #ffd700;
+  font-size: 20px;
+  font-weight: bold;
+  margin-top: 18px;
+}
+
+#view-lobby .room-card,
+#view-lobby .players-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+#view-lobby .room-mode {
+  color: #ffd700;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+#view-lobby .room-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #9aa0c3;
+  font-size: 12.5px;
+}
+
+#view-lobby .card-title {
+  color: #fff;
+  font-size: 15px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+#view-lobby .player-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+#view-lobby .player-row:last-child { border-bottom: none; }
+
+#view-lobby .p-avatar { font-size: 20px; }
+#view-lobby .p-name { flex: 1; color: #e8eaf8; font-size: 14px; }
+
+#view-lobby .p-tag {
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+#view-lobby .p-tag.host { background: rgba(255, 215, 0, 0.18); color: #ffd700; }
+#view-lobby .p-tag.ai { background: rgba(0, 200, 255, 0.15); color: #6fd8ff; }
+
+#view-lobby .p-ready { color: #7be0a2; font-size: 11px; }
+
+#view-lobby .ai-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+#view-lobby .ai-label { color: #cfd3f5; font-size: 13px; }
+
+#view-lobby .stepper { display: flex; align-items: center; gap: 12px; }
+
+#view-lobby .step-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 215, 0, 0.15);
+  color: #ffd700;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+#view-lobby .step-btn:active { background: rgba(255, 215, 0, 0.3); }
+#view-lobby .step-btn:disabled { opacity: 0.4; cursor: default; }
+
+#view-lobby .step-num { color: #fff; font-size: 16px; min-width: 24px; text-align: center; }
+
+#view-lobby .lobby-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+#view-lobby .secondary-actions { display: flex; gap: 10px; }
+
+#view-lobby .btn {
+  flex: 1;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+#view-lobby .btn:active { filter: brightness(0.95); }
+
+#view-lobby .btn-primary {
+  background: linear-gradient(90deg, #ffd700, #ff9a44);
+  color: #17172b;
+  font-weight: bold;
+  font-size: 15px;
+}
+
+#view-lobby .btn-ghost {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cfd3f5;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+#view-lobby .btn-ghost.danger { color: #ff8a9b; border-color: rgba(255, 90, 103, 0.4); }
