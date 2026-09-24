@@ -236,7 +236,7 @@ export function create(rootEl, globalStateRef) {
     if (!stealthOn) {
       const selfCat = disguiseOn ? true : isCat;
       markers.push({
-        id: 1,
+        id: 'player_self',
         latitude: s.latitude,
         longitude: s.longitude,
         icon: selfCat ? '🐱' : '🐭',
@@ -252,17 +252,9 @@ export function create(rootEl, globalStateRef) {
       const enemy = pCat !== isCat;
       const emoji = pCat ? '🐱' : '🐭';
 
-      let numId = 100;
-      if (typeof p.id === 'number') {
-        numId = p.id;
-      } else {
-        const parsed = parseInt(String(p.id).replace(/\D/g, ''), 10);
-        numId = isNaN(parsed) ? Math.floor(Math.random() * 899 + 100) : parsed;
-      }
-
       const highlight = (xrayOn && enemy) || (radarOn && enemy) || (scanOn && enemy);
       markers.push({
-        id: Number(numId),
+        id: 'player_' + p.id,
         latitude: p.latitude,
         longitude: p.longitude,
         icon: emoji,
@@ -276,7 +268,7 @@ export function create(rootEl, globalStateRef) {
     // 声东击西诱饵标记
     if (decoyOn) {
       markers.push({
-        id: 999,
+        id: 'player_decoy',
         latitude: s.latitude + 0.00045,
         longitude: s.longitude + 0.0003,
         icon: '🎭',

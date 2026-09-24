@@ -1,6 +1,10 @@
 /* css/rank.css — 排行榜（移植 pages/rank/rank.wxss，rpx→px÷2，作用域 #view-rank） */
 #view-rank {
   background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+}
+/* display 交给基础 .view 规则（.view{none} / .view.active{block}）；
+   仅激活时以 flex 列布局呈现，避免 #id 选择器（特异性 1,0,0）覆盖 .view 导致本视图恒显、遮挡其它 fixed 视图 */
+#view-rank.active {
   display: flex;
   flex-direction: column;
 }
