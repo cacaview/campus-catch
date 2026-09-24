@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>校园定位活动</title>
+  <link rel="stylesheet" href="vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/home.css">
+  <link rel="stylesheet" href="css/lobby.css">
+  <link rel="stylesheet" href="css/game.css">
+  <link rel="stylesheet" href="css/result.css">
+  <link rel="stylesheet" href="css/rank.css">
+  <script src="vendor/maplibre-gl.js"></script>
+</head>
+<body>
+  <main id="app">
+    <section id="view-home" class="view">
+      <div class="view-loading">加载中…</div>
+    </section>
+    <section id="view-lobby" class="view">
+      <div class="view-loading">加载中…</div>
+    </section>
+    <section id="view-game" class="view view-full">
+      <div class="view-loading">加载中…</div>
+    </section>
+    <section id="view-result" class="view">
+      <div class="view-loading">加载中…</div>
+    </section>
+    <section id="view-rank" class="view">
+      <div class="view-loading">加载中…</div>
+    </section>
+  </main>
+
+  <!-- 平台层容器（js/platform/ui.js 操作这些节点） -->
+  <div id="app-toast" role="status"></div>
+  <div id="app-modal-mask" class="platform-mask">
+    <div id="app-modal-box">
+      <div id="app-modal-title" class="modal-title"></div>
+      <div id="app-modal-content" class="modal-content"></div>
+      <div class="modal-btns">
+        <button id="app-modal-cancel" class="m-btn cancel">取消</button>
+        <button id="app-modal-confirm" class="m-btn confirm">确定</button>
+      </div>
+    </div>
+  </div>
+  <div id="app-loading" class="platform-loading"><div class="spinner"></div><div id="app-loading-text"></div></div>
+  <div id="app-actionsheet-mask" class="platform-mask bottom"></div>
+  <div id="app-actionsheet" class="platform-sheet"><div id="app-actionsheet-list"></div></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

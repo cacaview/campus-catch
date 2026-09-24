@@ -1,0 +1,101 @@
+/* css/base.css — 主题变量/动画/平台层（移植 app.wxss，rpx→px÷2） */
+:root {
+  --cat-color: #ff4757;
+  --mouse-color: #3742fa;
+  --gold: #ffd700;
+  --bg-dark: #1a1a2e;
+  --bg-card: rgba(255, 255, 255, 0.1);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --cat-badge: #ff3366;
+  --mouse-badge: #33ccff;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+input, textarea { user-select: text; }
+
+/* 视图切换：单屏 SPA，view 全屏堆叠 */
+.view { display: none; position: fixed; inset: 0; overflow-y: auto; background: var(--bg-dark); }
+.view.active { display: block; }
+.view.view-full { overflow: hidden; }
+.view-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+
+/* 通用按钮（原 m-btn / btn） */
+.m-btn, .btn {
+  border: none; border-radius: 8px; padding: 10px 18px; font-size: 15px;
+  cursor: pointer; color: var(--text-primary);
+}
+.m-btn.confirm, .btn-primary { background: linear-gradient(135deg, #ff5a67, #ff4757); font-weight: 700; }
+.m-btn.cancel, .btn-secondary { background: rgba(255, 255, 255, 0.15); }
+.btn-ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); }
+.btn-ghost.danger { color: #ff6b81; border-color: rgba(255, 107, 129, 0.5); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 平台层：toast */
+#app-toast {
+  position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75); color: #fff; padding: 10px 18px;
+  border-radius: 8px; font-size: 14px; max-width: 80vw; text-align: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 1000;
+}
+#app-toast.show { opacity: 1; }
+
+/* 平台层：modal */
+.platform-mask {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+  display: none; align-items: center; justify-content: center; z-index: 900;
+}
+.platform-mask.show { display: flex; }
+.platform-mask.bottom { align-items: flex-end; background: transparent; }
+#app-modal-box {
+  background: #23234a; border-radius: 12px; padding: 20px; width: min(320px, 86vw);
+  max-height: 70vh; overflow-y: auto;
+}
+.modal-title { font-size: 17px; font-weight: 700; text-align: center; margin-bottom: 12px; }
+.modal-content { font-size: 14px; color: var(--text-secondary); line-height: 1.6; white-space: pre-line; }
+.modal-btns { display: flex; gap: 10px; margin-top: 18px; }
+.modal-btns .m-btn { flex: 1; }
+
+/* 平台层：loading */
+.platform-loading {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; z-index: 950;
+}
+.platform-loading.show { display: flex; }
+.spinner {
+  width: 34px; height: 34px; border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#app-loading-text { color: #fff; font-size: 14px; }
+
+/* 平台层：actionsheet */
+.platform-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; background: #23234a;
+  border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom);
+  transform: translateY(110%); transition: transform 0.25s; z-index: 940;
+}
+.platform-sheet.show { transform: translateY(0); }
+.sheet-item {
+  display: block; width: 100%; border: none; background: transparent;
+  color: #fff; font-size: 16px; padding: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+/* 全局动画（app.wxss） */
+@keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.05); opacity: 0.8; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes glow { 0% { box-shadow: 0 0 5px rgba(255,215,0,0.5); } 50% { box-shadow: 0 0 20px rgba(255,215,0,0.8); } 100% { box-shadow: 0 0 5px rgba(255,215,0,0.5); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.anim-pulse { animation: pulse 2s infinite; }
+.anim-glow { animation: glow 2s infinite; }
+.anim-fade-in { animation: fadeIn 0.5s ease-in-out; }
+.anim-slide-up { animation: slideUp 0.5s ease-out; }
