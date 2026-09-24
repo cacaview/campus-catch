@@ -1,1 +1,256 @@
-/* Task 8-12 填充 */
+/* css/result.css — 结算页（移植 pages/result/result.wxss，rpx→px÷2，作用域 #view-result） */
+#view-result {
+  background: linear-gradient(180deg, #1a1a2e 0%, #0f0f23 100%);
+}
+#view-result.win {
+  background: linear-gradient(180deg, rgba(255, 215, 0, 0.2) 0%, #0f0f23 60%);
+}
+#view-result.lose {
+  background: linear-gradient(180deg, rgba(255, 71, 87, 0.1) 0%, #0f0f23 60%);
+  filter: grayscale(20%);
+}
+
+#view-result .result-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+  position: relative;
+  transition: all 0.5s;
+}
+
+#view-result .anim-stagger-1 { animation: slideUp 0.6s ease-out 0.1s both; }
+#view-result .anim-stagger-2 { animation: slideUp 0.6s ease-out 0.3s both; }
+#view-result .anim-stagger-3 { animation: slideUp 0.6s ease-out 0.5s both; }
+#view-result .anim-stagger-4 { animation: slideUp 0.6s ease-out 0.7s both; }
+@keyframes slideUp {
+  0% { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* 空态 */
+#view-result .result-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+}
+#view-result .result-empty-icon { font-size: 60px; }
+#view-result .result-empty-text { color: #9aa0c3; font-size: 14px; margin-bottom: 12px; }
+
+/* 头部 */
+#view-result .result-header {
+  text-align: center;
+  margin-top: 20px;
+  margin-bottom: 30px;
+}
+#view-result .result-title {
+  font-size: 36px;
+  font-weight: bold;
+  text-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+  display: block;
+  margin-bottom: 10px;
+}
+#view-result .result-banner-box { text-align: center; }
+#view-result .result-banner {
+  display: inline-block;
+  padding: 5px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: bold;
+}
+#view-result .result-banner.cat { background: rgba(255, 71, 87, 0.2); color: #ff4757; border: 1px solid #ff4757; }
+#view-result .result-banner.mouse { background: rgba(55, 66, 250, 0.2); color: #8c7ae6; border: 1px solid #3742fa; }
+#view-result .result-banner.draw { background: rgba(255, 215, 0, 0.15); color: #ffd700; border: 1px solid #ffd700; }
+
+/* 双方得分榜 */
+#view-result .scoreboard {
+  display: flex;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 15px;
+  backdrop-filter: blur(10px);
+  margin-bottom: 20px;
+  flex: 1;
+  overflow-y: auto;
+}
+#view-result .team-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+#view-result .col-title {
+  text-align: center;
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: #ccc;
+}
+#view-result .cat-col .col-title { color: #ff4757; }
+#view-result .mouse-col .col-title { color: #6a7bff; }
+#view-result .divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 10px;
+}
+#view-result .player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#view-result .player-item {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px;
+  border-radius: 8px;
+  position: relative;
+  border: 1px solid transparent;
+}
+#view-result .player-item.me { background: rgba(255, 255, 255, 0.1); }
+#view-result .player-item.mvp {
+  border-color: #ffd700;
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+}
+#view-result .avatar { font-size: 25px; margin-right: 8px; }
+#view-result .p-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+#view-result .p-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#view-result .tag { color: #ffd700; font-size: 10px; }
+#view-result .p-score { font-size: 14px; font-weight: bold; color: #fff; }
+#view-result .mvp-icon {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  font-size: 16px;
+}
+
+/* 我的统计 */
+#view-result .stats-section {
+  display: flex;
+  justify-content: space-around;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 15px 0;
+  border-radius: 10px;
+  margin-bottom: 25px;
+}
+#view-result .stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#view-result .stat-val {
+  font-size: 18px;
+  font-weight: bold;
+  color: #ffd700;
+  margin-bottom: 4px;
+}
+#view-result .stat-label { font-size: 11px; color: #aaa; }
+
+/* 足迹回放 */
+#view-result .replay-card {
+  width: 92%;
+  margin: 12px auto 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+#view-result .replay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+#view-result .replay-title { color: #ffd700; font-size: 14px; font-weight: bold; }
+#view-result .replay-progress { color: #9aa0c3; font-size: 11px; }
+#view-result .replay-map {
+  width: 100%;
+  height: 180px;
+  border-radius: 7px;
+}
+#view-result .replay-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: center;
+}
+#view-result .replay-btn {
+  flex: 1;
+  font-size: 12px;
+  height: auto;
+  line-height: 1.6;
+  padding: 6px 0;
+}
+#view-result .replay-empty {
+  width: 92%;
+  margin: 12px auto 0;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 14px;
+}
+#view-result .replay-empty-text { color: #8a8fb0; font-size: 12px; line-height: 1.6; }
+
+/* 操作按钮 */
+#view-result .actions {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 10px;
+}
+#view-result .actions .btn {
+  flex: 1;
+  height: 45px;
+  line-height: 45px;
+  border-radius: 22px;
+  font-size: 16px;
+  font-weight: bold;
+}
+#view-result .actions-row2 { margin-top: 8px; }
+
+/* 胜利彩带 */
+#view-result .result-particles {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 10;
+  overflow: hidden;
+  display: none;
+}
+#view-result.win .result-particles { display: block; }
+#view-result .particle {
+  position: absolute;
+  top: -10px;
+  width: 5px;
+  height: 10px;
+  background: #ffd700;
+  animation: fall 3s linear infinite;
+}
+@keyframes fall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(120vh) rotate(360deg); opacity: 0; }
+}
+
+/* 战报卡片离屏画布 */
+#view-result .share-canvas {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 600px;
+  height: 960px;
+}
