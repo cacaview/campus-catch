@@ -1,1 +1,359 @@
-/* Task 8-12 填充 */
+/* css/game.css — 游戏页样式（源 pages/game/game.wxss + components/{toolbar,chat-panel,skill-card}/*.wxss 移植，rpx→px÷2，scoped 到 #view-game） */
+#view-game { background: #1a1a2e; }
+
+/* 地图底层 */
+#view-game #game-map {
+  position: absolute; inset: 0; z-index: 0;
+}
+
+/* 越界警告 */
+#view-game .boundary-warning {
+  position: absolute; z-index: 80; top: 90px; left: 20px; right: 20px;
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 13px; border-radius: 10px; color: #fff;
+  background: rgba(180, 35, 35, 0.94);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.35);
+}
+#view-game .boundary-warning[hidden] { display: none; }
+#view-game .boundary-icon { font-size: 23px; }
+#view-game .bw-text { display: flex; flex-direction: column; }
+#view-game .boundary-title { font-weight: 700; font-size: 14px; }
+#view-game .boundary-sub { margin-top: 2px; color: rgba(255, 255, 255, 0.8); font-size: 10.5px; }
+
+/* 标题水印 */
+#view-game .watermark {
+  position: absolute; top: 85px; left: 0; width: 100%;
+  text-align: center; z-index: 1; pointer-events: none; opacity: 0.18;
+}
+#view-game .watermark-title {
+  font-size: 13px; font-weight: 700; color: #ff3366;
+  text-shadow: 0 0 5px rgba(255, 51, 102, 0.6); letter-spacing: 2px;
+}
+#view-game .watermark-subtitle {
+  font-size: 10px; font-weight: bold; color: #ffcc00; margin-top: 2px;
+  text-shadow: 0 0 4px rgba(255, 204, 0, 0.6);
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+#view-game .net-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+#view-game .dot-online { background-color: #4cd137; box-shadow: 0 0 5px #4cd137; }
+#view-game .dot-connecting { background-color: #fbc531; box-shadow: 0 0 5px #fbc531; animation: game-pulse-dot 1s infinite alternate; }
+#view-game .dot-offline { background-color: #718093; }
+#view-game .dot-disconnected { background-color: #e84118; box-shadow: 0 0 5px #e84118; }
+@keyframes game-pulse-dot { 0% { opacity: 0.3; } 100% { opacity: 1; } }
+
+/* 顶部 HUD */
+#view-game .top-hud {
+  position: absolute; top: 40px; left: 0; width: 100%;
+  padding: 0 15px; display: flex; justify-content: space-between; align-items: center; z-index: 10;
+}
+#view-game .hud-item {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px; padding: 5px 12px;
+  color: #fff; font-size: 16px; font-weight: bold;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(5px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+#view-game .hud-btn { cursor: pointer; }
+#view-game .hud-item.timer {
+  font-size: 18px; min-width: 80px; text-align: center;
+  border-color: rgba(0, 200, 255, 0.4);
+}
+#view-game .hud-item.timer-danger {
+  color: #ff3366; border-color: rgba(255, 51, 102, 0.6);
+  animation: game-pulse 1s infinite alternate;
+}
+#view-game .host-btn { background: rgba(255, 215, 0, 0.18); }
+#view-game .host-btn.host-disabled { opacity: 0.35; }
+#view-game .backpack-btn { font-size: 20px; padding: 5px 15px; }
+@keyframes game-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 2.5px #ff3366; }
+  100% { transform: scale(1.05); box-shadow: 0 0 10px #ff3366; }
+}
+
+/* 战况速报悬浮层 */
+#view-game .battle-feed {
+  position: absolute; top: 65px; left: 10px; right: 10px;
+  display: flex; flex-direction: column; gap: 4px;
+  pointer-events: none; z-index: 30;
+}
+#view-game .feed-item {
+  background: rgba(10, 10, 30, 0.72);
+  border-left: 3px solid #ffd700;
+  border-radius: 5px; padding: 5px 9px;
+  color: #ffe9a8; font-size: 12px; line-height: 1.4;
+  animation: game-feed-in 0.25s ease-out;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+  max-width: 70%;
+}
+@keyframes game-feed-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 暂停遮罩 */
+#view-game .pause-overlay {
+  position: absolute; inset: 0;
+  background: rgba(8, 8, 24, 0.82);
+  display: flex; align-items: center; justify-content: center; z-index: 90;
+}
+#view-game .pause-overlay[hidden] { display: none; }
+#view-game .pause-card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid rgba(255, 215, 0, 0.5);
+  border-radius: 12px; padding: 24px 32px;
+}
+#view-game .pause-icon { font-size: 44px; }
+#view-game .pause-title { color: #ffd700; font-size: 18px; font-weight: bold; }
+#view-game .pause-sub { color: #9aa0c3; font-size: 12px; }
+
+/* 倒计时遮罩 */
+#view-game .countdown-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex; justify-content: center; align-items: center; z-index: 50;
+}
+#view-game .countdown-overlay[hidden] { display: none; }
+#view-game .countdown-text {
+  font-size: 100px; font-weight: 900; color: #ffcc00;
+  text-shadow: 0 0 20px rgba(255, 204, 0, 0.8), 0 5px 5px #000;
+  animation: game-countdown-pop 1s infinite;
+}
+@keyframes game-countdown-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+/* 右侧工具栏 */
+#view-game .right-toolbar {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 10;
+}
+#view-game .toolbar-container {
+  display: flex; flex-direction: column; gap: 10px;
+  background: rgba(20, 20, 46, 0.4);
+  backdrop-filter: blur(10px);
+  padding: 10px 6px; border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.3);
+}
+#view-game .tool-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(40, 40, 60, 0.8);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: all 0.3s ease; cursor: pointer;
+}
+#view-game .tool-btn:active { transform: scale(0.9); border-color: rgba(255, 255, 255, 0.5); }
+#view-game .tool-btn .icon { font-size: 18px; color: #fff; margin-bottom: -2px; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+#view-game .tool-btn .label { font-size: 8px; color: #ccc; margin-top: 2px; }
+
+/* 聊天面板 */
+#view-game .chat-wrapper {
+  position: absolute; left: 10px;
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  width: 65%; z-index: 10; pointer-events: none;
+}
+#view-game .chat-container {
+  display: flex; flex-direction: column; position: relative;
+  pointer-events: none;
+}
+#view-game #game-chat-scroll {
+  max-height: 150px; overflow-y: auto;
+  background: rgba(10, 10, 30, 0.5);
+  backdrop-filter: blur(8px);
+  border-radius: 8px; padding: 5px;
+  pointer-events: auto;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  display: none;
+}
+#view-game #game-chat-scroll.has-msg { display: block; }
+#view-game .message-list { display: flex; flex-direction: column; gap: 4px; }
+#view-game .message-item {
+  padding: 4px 8px; border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4);
+  border-left: 3px solid #e0e0e0;
+}
+#view-game .message-item.notification { border-left-color: #ffd700; }
+#view-game .message-item.notification .text,
+#view-game .message-item.notification .prefix { color: #ffd700; }
+#view-game .message-item .text { color: #fff; }
+#view-game .message-item .sender { color: #a0c0ff; margin-right: 4px; font-weight: bold; }
+#view-game .message-content {
+  font-size: 12px; display: flex; align-items: center; word-break: break-all;
+  animation: game-slide-in 0.3s ease-out;
+}
+#view-game .prefix { margin-right: 4px; }
+@keyframes game-slide-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+#view-game .chat-input-bar {
+  display: none; margin-top: 5px;
+  background: rgba(20, 20, 46, 0.8);
+  border-radius: 16px; padding: 4px 8px;
+  pointer-events: auto; align-items: center;
+}
+#view-game .chat-input-bar.show { display: flex; }
+#view-game #game-chat-input {
+  flex: 1; color: #fff; font-size: 13px; height: 30px;
+  background: transparent; border: none; outline: none;
+}
+#view-game #game-chat-send {
+  color: #fff; background: #409eff;
+  padding: 4px 12px; border-radius: 12px; font-size: 12px;
+  margin-left: 5px; border: none; cursor: pointer;
+}
+#view-game .chat-toggle-btn {
+  position: absolute; right: -40px; bottom: 0;
+  width: 30px; height: 30px;
+  background: rgba(20, 20, 46, 0.7);
+  border-radius: 15px;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer; font-size: 14px;
+}
+
+/* 技能栏 */
+#view-game .skill-bar {
+  position: absolute;
+  bottom: calc(60px + env(safe-area-inset-bottom));
+  left: 0; width: 100%;
+  height: 130px; z-index: 10;
+  overflow-x: auto; overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+#view-game .skill-bar::-webkit-scrollbar { display: none; }
+#view-game .skill-list {
+  display: inline-flex; padding: 0 10px;
+  align-items: center; height: 100%; gap: 10px;
+}
+#view-game .skill-card {
+  position: relative;
+  width: 90px; height: 120px;
+  border-radius: 12px;
+  background: rgba(20, 20, 46, 0.6);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+  animation: game-float 3s ease-in-out infinite;
+  cursor: pointer; flex-shrink: 0;
+}
+#view-game .skill-card.mouse { border-color: rgba(64, 158, 255, 0.5); box-shadow: 0 0 10px rgba(64, 158, 255, 0.3); }
+#view-game .skill-card.cat { border-color: rgba(255, 77, 79, 0.5); box-shadow: 0 0 10px rgba(255, 77, 79, 0.3); }
+#view-game .skill-card:active { transform: scale(0.95); }
+#view-game .skill-card .glow-bg {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+  z-index: 0;
+}
+#view-game .skill-card .icon-container {
+  flex: 1; display: flex; align-items: center; justify-content: center; z-index: 1;
+}
+#view-game .skill-card .emoji-icon { font-size: 40px; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5); }
+#view-game .skill-card .info {
+  width: 100%; padding: 5px; box-sizing: border-box;
+  text-align: center; background: rgba(0, 0, 0, 0.3); z-index: 1;
+}
+#view-game .skill-card .name {
+  color: #fff; font-size: 12px; font-weight: bold;
+  display: block; margin-bottom: 2px;
+}
+#view-game .skill-card .uses-counter { font-size: 10px; color: #aaa; }
+#view-game .skill-card.disabled,
+#view-game .skill-card.depleted { opacity: 0.6; filter: grayscale(100%); animation: none; }
+#view-game .skill-card .overlay {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10;
+}
+#view-game .skill-card .crossed { font-size: 30px; }
+@keyframes game-float {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+  100% { transform: translateY(0); }
+}
+
+/* 抓捕覆盖层 */
+#view-game .catch-overlay {
+  position: absolute; inset: 0;
+  background: rgba(255, 0, 0, 0.2);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 100; pointer-events: none;
+}
+#view-game .catch-overlay[hidden] { display: none; }
+#view-game .catch-content {
+  background: linear-gradient(135deg, rgba(255, 51, 102, 0.9), rgba(255, 0, 0, 0.7));
+  padding: 20px 40px; border-radius: 40px;
+  box-shadow: 0 0 25px rgba(255, 51, 102, 0.8);
+  animation: game-dramatic-catch 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+#view-game .catch-text {
+  font-size: 30px; font-weight: 900; color: #fff;
+  text-shadow: 0 2px 5px rgba(0, 0, 0, 0.5); letter-spacing: 2px;
+}
+@keyframes game-dramatic-catch {
+  0% { transform: scale(0.1) rotate(-10deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* 实时排名弹窗 */
+#view-game .rank-mask {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 210;
+  display: flex; align-items: center; justify-content: center;
+}
+#view-game .rank-mask[hidden] { display: none; }
+#view-game .rank-modal {
+  width: 78%; max-width: 310px;
+  background: #1f1f38;
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  border-radius: 12px;
+  padding: 17px 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+#view-game .rank-modal-title {
+  text-align: center; font-size: 17px; font-weight: 800;
+  color: #ffd700; margin-bottom: 12px;
+}
+#view-game .rank-modal-list { display: flex; flex-direction: column; gap: 7px; }
+#view-game .rank-modal-row {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 7px; padding: 8px 10px;
+}
+#view-game .rank-modal-row.me {
+  background: rgba(255, 215, 0, 0.14);
+  border: 1px solid rgba(255, 215, 0, 0.45);
+}
+#view-game .rk-num {
+  width: 24px; text-align: center; font-weight: 800;
+  color: #aab; font-size: 14px;
+}
+#view-game .rk-num.top3 { color: #ffd700; }
+#view-game .rk-avatar { font-size: 17px; }
+#view-game .rk-name {
+  flex: 1; color: #fff; font-size: 13.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#view-game .rk-score { color: #ffd700; font-weight: 700; font-size: 14px; }
+#view-game .rank-modal-tip {
+  margin-top: 10px; text-align: center;
+  color: #8ec9ff; font-size: 11px;
+}
+#view-game .rank-close {
+  margin-top: 13px;
+  background: linear-gradient(135deg, #4a90ff, #6c5ce7);
+  color: #fff; border-radius: 20px; font-size: 14px;
+}

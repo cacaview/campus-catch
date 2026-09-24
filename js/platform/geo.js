@@ -14,7 +14,9 @@ export function getLocation({ success, fail } = {}) {
   }
   navigator.geolocation.getCurrentPosition(
     pos => success && success({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-    err => fail && fail(err)
+    err => fail && fail(err),
+    // 与 wx.getLocation 的默认 10s 超时对齐：桌面无 GPS 时不能无限挂起
+    { timeout: 10000, maximumAge: 60000 }
   );
 }
 
