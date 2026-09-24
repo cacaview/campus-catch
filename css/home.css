@@ -1,1 +1,347 @@
-/* Task 8-12 填充 */
+/* css/home.css — 首页样式（源 pages/index/index.wxss 移植，rpx→px÷2，scoped 到 #view-home） */
+#view-home {
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+}
+#view-home > * {
+  width: min(560px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0 20px;
+}
+
+/* 头部 */
+#view-home .header { margin-top: 15px; margin-bottom: 20px; padding: 0; }
+#view-home .title-container { display: flex; align-items: center; justify-content: center; }
+#view-home .emoji-anim { font-size: 40px; animation: home-bounce 2s infinite ease-in-out; }
+#view-home .emoji-anim.cat { animation-delay: 0s; margin-right: 10px; }
+#view-home .emoji-anim.mouse { animation-delay: 1s; margin-left: 10px; }
+@keyframes home-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+#view-home .title-box { display: flex; flex-direction: column; align-items: center; }
+#view-home .main-title {
+  font-size: 28px; font-weight: bold;
+  background: linear-gradient(90deg, #ff4757, #ffd700);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 5px rgba(255, 71, 87, 0.3);
+}
+#view-home .sub-title { font-size: 16px; color: #a0a0b0; margin-top: 5px; letter-spacing: 2px; }
+
+/* 应战邀请横幅 */
+#view-home .challenge-banner {
+  margin: 0 auto 10px;
+  background: linear-gradient(90deg, rgba(255, 71, 87, 0.16), rgba(255, 154, 68, 0.16));
+  border: 1px solid rgba(255, 107, 129, 0.5);
+  border-radius: 10px;
+  padding: 11px 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+#view-home .challenge-info { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+#view-home .challenge-title { color: #ff8a9b; font-size: 14px; font-weight: bold; }
+#view-home .challenge-sub { color: #c7cbe8; font-size: 11px; line-height: 1.5; }
+#view-home .challenge-actions { display: flex; flex-direction: column; gap: 5px; }
+#view-home .challenge-btn { font-size: 11px; border-radius: 12px; padding: 0 12px; line-height: 2.2; border: none; cursor: pointer; }
+#view-home .challenge-btn.accept { background: linear-gradient(90deg, #ff5a67, #ff9a44); color: #fff; }
+#view-home .challenge-btn.dismiss { background: rgba(255,255,255,0.1); color: #9aa0c3; }
+
+/* 队伍选择 */
+#view-home .team-selection { display: flex; justify-content: space-between; margin-bottom: 15px; gap: 10px; }
+#view-home .team-card {
+  flex: 1; min-height: 130px; border-radius: 15px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 2px solid transparent;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+#view-home .cat-card { box-shadow: 0 5px 15px rgba(255, 71, 87, 0.1); }
+#view-home .mouse-card { box-shadow: 0 5px 15px rgba(55, 66, 250, 0.1); }
+#view-home .team-card.selected.cat-card {
+  border-color: #ff4757; transform: scale(1.03);
+  background: linear-gradient(135deg, rgba(255,71,87,0.2) 0%, rgba(255,71,87,0.05) 100%);
+  box-shadow: 0 0 15px rgba(255, 71, 87, 0.4);
+}
+#view-home .team-card.selected.mouse-card {
+  border-color: #3742fa; transform: scale(1.03);
+  background: linear-gradient(135deg, rgba(55,66,250,0.2) 0%, rgba(55,66,250,0.05) 100%);
+  box-shadow: 0 0 15px rgba(55, 66, 250, 0.4);
+}
+#view-home .team-emoji { font-size: 40px; margin-bottom: 5px; }
+#view-home .team-name { font-size: 18px; font-weight: bold; margin-bottom: 3px; }
+#view-home .cat-card .team-name { color: #ff4757; }
+#view-home .mouse-card .team-name { color: #6f7dff; }
+#view-home .team-desc { font-size: 12px; color: #a0a0b0; }
+
+/* 昵称 */
+#view-home .input-section { margin-bottom: 15px; }
+#view-home .nickname-input {
+  width: 100%; height: 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px; padding: 0 20px;
+  text-align: center; font-size: 15px; color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+#view-home .nickname-input::placeholder { color: #888; }
+
+/* 区域框选 */
+#view-home .area-section { margin-bottom: 15px; }
+#view-home .section-title { font-size: 14px; color: #a0a0b0; margin-bottom: 8px; text-align: left; }
+#view-home .area-title { display: flex; justify-content: space-between; align-items: center; }
+#view-home .area-title #home-area-count { color: #ffd700; font-size: 11px; }
+#view-home .area-map {
+  width: 100%; height: 220px; border-radius: 12px; overflow: hidden;
+  border: 1px solid rgba(255,215,0,0.45);
+  position: relative;
+}
+#view-home .area-help { color: #aaa; font-size: 11px; line-height: 1.5; margin: 6px 2px; }
+#view-home .area-actions { display: flex; align-items: center; gap: 6px; }
+#view-home .mini-btn {
+  border: none; border-radius: 12px; padding: 5px 12px;
+  font-size: 11px; color: #ddd; background: rgba(255,255,255,0.1); cursor: pointer;
+}
+#view-home .area-state { margin-left: auto; color: #ff7675; font-size: 11px; }
+#view-home .area-state.ok { color: #4cd137; }
+#view-home .area-templates { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+#view-home .tpl-label { color: #8a8fb0; font-size: 12px; }
+#view-home .tpl-btn {
+  background: rgba(0, 200, 255, 0.12);
+  color: #6fd8ff;
+  border: 1px solid rgba(0, 200, 255, 0.4);
+}
+
+/* 时长 */
+#view-home .duration-section {
+  margin-bottom: 15px; padding: 11px 12px; border-radius: 11px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+}
+#view-home .duration-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+#view-home .duration-value { color: #ffd700; font-size: 15px; font-weight: 700; }
+#view-home .duration-slider { width: 100%; margin: 4px 0 0; accent-color: #ffd700; }
+#view-home .duration-marks { display: flex; justify-content: space-between; color: #777; font-size: 10px; }
+
+/* 称号任务条 */
+#view-home .title-task-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; gap: 8px; flex-wrap: wrap; }
+#view-home .equipped-title-badge {
+  flex: 1; min-width: 200px;
+  background: rgba(255, 215, 0, 0.1);
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  border-radius: 15px; padding: 6px 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  font-size: 12px; color: #ffd700; cursor: pointer;
+}
+#view-home .title-name { font-weight: bold; }
+#view-home .daily-task-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 15px; padding: 6px 12px; font-size: 12px; color: #fff; cursor: pointer;
+}
+#view-home .daily-task-btn.shop-btn { background: linear-gradient(90deg, #ff9a44, #ff5a67); }
+
+/* 联机模式 */
+#view-home .network-mode-section { margin-bottom: 15px; }
+#view-home .mode-tabs { display: flex; gap: 8px; }
+#view-home .mode-tab {
+  flex: 1; height: 35px; line-height: 33px; text-align: center;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 17px; font-size: 13px; color: #ccc;
+  transition: all 0.3s; cursor: pointer;
+}
+#view-home .mode-tab.active {
+  background: rgba(0, 200, 255, 0.2);
+  border-color: #00c8ff; color: #fff; font-weight: bold;
+  box-shadow: 0 0 8px rgba(0, 200, 255, 0.4);
+}
+
+/* 服务器面板 */
+#view-home .lan-panel {
+  margin-bottom: 15px;
+  background: rgba(0, 200, 255, 0.08);
+  border: 1px dashed rgba(0, 200, 255, 0.3);
+  border-radius: 12px; padding: 10px;
+}
+#view-home .input-item { display: flex; flex-direction: column; gap: 5px; }
+#view-home .label { font-size: 13px; color: #aaa; }
+#view-home .modal-input {
+  background: rgba(255,255,255,0.1); border-radius: 6px;
+  height: 35px; padding: 0 10px; color: #fff; font-size: 14px;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+#view-home .info-sub { font-size: 11px; color: #888; margin-top: 6px; line-height: 1.5; }
+#view-home .lan-actions { display: flex; gap: 10px; margin-top: 8px; }
+#view-home .lan-btn {
+  flex: 1; height: 35px; line-height: 33px; font-size: 13px;
+  border-radius: 17px; border: none; cursor: pointer;
+}
+#view-home .lan-btn.host-btn { background: #ff4757; color: #fff; }
+#view-home .lan-btn.join-btn { background: #3742fa; color: #fff; }
+#view-home .room-created-info {
+  margin-top: 10px; background: rgba(0,0,0,0.3);
+  padding: 8px; border-radius: 8px;
+  display: flex; flex-direction: column; align-items: center;
+}
+#view-home .info-title { font-size: 13px; color: #4cd137; font-weight: bold; }
+#view-home .info-item { font-size: 14px; color: #fff; margin: 3px 0; }
+#view-home .join-link-text {
+  font-size: 11px; color: #6fd8ff; word-break: break-all;
+  background: rgba(0,0,0,0.3); border-radius: 6px; padding: 6px 8px; margin: 6px 0;
+  max-width: 100%;
+}
+#view-home .copy-invite-btn {
+  margin-top: 7px;
+  background: rgba(0, 200, 255, 0.12);
+  color: #6fd8ff;
+  border: 1px solid rgba(0, 200, 255, 0.4);
+}
+
+/* 操作区 */
+#view-home .action-section { margin-bottom: 20px; }
+#view-home .ready-checklist { display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+#view-home .check-item {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 12px; color: #8a8fb0;
+  background: rgba(255,255,255,0.06); border-radius: 12px; padding: 4px 10px;
+}
+#view-home .check-item.ok { color: #7be0a2; background: rgba(123, 224, 162, 0.12); }
+#view-home .start-btn {
+  width: 100%; height: 48px;
+  border-radius: 24px;
+  background: #333; color: #888;
+  font-size: 17px; font-weight: bold;
+  transition: all 0.3s; border: none; cursor: pointer;
+}
+#view-home .start-btn.ready {
+  background: linear-gradient(90deg, #ffd700, #ffaa00);
+  color: #000;
+  box-shadow: 0 5px 10px rgba(255, 215, 0, 0.3);
+  animation: home-pulse 2s infinite;
+}
+@keyframes home-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 215, 0, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); }
+}
+#view-home .lobby-entry-btn {
+  margin-top: 8px; width: 100%;
+  background: rgba(255, 255, 255, 0.08); color: #cfd3f5;
+  font-size: 13px; border-radius: 15px; padding: 9px 0;
+  border: 1px solid rgba(255, 255, 255, 0.2); cursor: pointer;
+}
+
+/* 规则 */
+#view-home .rules-section { background: rgba(0, 0, 0, 0.3); border-radius: 10px; overflow: hidden; margin-bottom: 40px; }
+#view-home .rules-header {
+  padding: 12px 15px; display: flex; justify-content: space-between; align-items: center;
+  font-size: 14px; color: #ddd; cursor: pointer;
+}
+#view-home .arrow { font-size: 12px; transition: transform 0.3s; }
+#view-home .arrow.up { transform: rotate(180deg); }
+#view-home .rules-content { padding: 0 15px 12px; display: flex; flex-direction: column; font-size: 12px; color: #aaa; line-height: 1.8; }
+
+/* 弹窗（视图内） */
+#view-home .modal-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  display: flex; justify-content: center; align-items: center; z-index: 900;
+}
+#view-home .modal-mask[hidden] { display: none; }
+#view-home .modal-box {
+  width: min(360px, 86vw);
+  background: #1a1a2e;
+  border: 1px solid rgba(0,200,255,0.4);
+  border-radius: 15px; padding: 20px;
+  box-shadow: 0 0 20px rgba(0,200,255,0.3);
+  max-height: 72vh; overflow-y: auto;
+}
+#view-home .modal-box .modal-title { color: #00c8ff; font-size: 17px; }
+#view-home .close-btn { margin-top: 10px; width: 100%; }
+
+/* 称号列表 */
+#view-home .title-list { display: flex; flex-direction: column; gap: 8px; max-height: 225px; overflow-y: auto; margin-bottom: 15px; }
+#view-home .title-item {
+  display: flex; align-items: center;
+  background: rgba(255,255,255,0.06);
+  padding: 8px 10px; border-radius: 8px;
+  border: 1px solid transparent; cursor: pointer;
+}
+#view-home .title-item.equipped { border-color: #ffd700; background: rgba(255, 215, 0, 0.15); }
+#view-home .title-item.locked { opacity: 0.5; }
+#view-home .t-icon { font-size: 20px; margin-right: 8px; }
+#view-home .t-info { flex: 1; display: flex; flex-direction: column; }
+#view-home .t-name { font-size: 13px; font-weight: bold; color: #fff; }
+#view-home .t-desc { font-size: 10px; color: #aaa; }
+#view-home .t-status { font-size: 11px; color: #ffd700; white-space: nowrap; }
+
+/* 任务 */
+#view-home .task-list { display: flex; flex-direction: column; gap: 8px; }
+#view-home .task-item {
+  display: flex; align-items: center;
+  background: rgba(255,255,255,0.06);
+  padding: 8px 10px; border-radius: 8px;
+}
+#view-home .task-info { flex: 1; display: flex; flex-direction: column; }
+#view-home .task-t { font-size: 13px; color: #fff; font-weight: bold; }
+#view-home .task-p { font-size: 11px; color: #aaa; }
+#view-home .task-status { font-size: 12px; color: #888; }
+#view-home .task-status.done { color: #4cd137; font-weight: bold; }
+#view-home .task-group-title { color: #ffd700; font-size: 13px; font-weight: bold; margin: 10px 0 4px; }
+#view-home .task-claim-btn {
+  border: none;
+  background: linear-gradient(90deg, #ffd700, #ffaa00);
+  color: #000; font-weight: 800;
+  border-radius: 15px; font-size: 12px;
+  padding: 0 12px; line-height: 2.4; cursor: pointer;
+}
+
+/* 积分钱包 */
+#view-home .wallet-bar {
+  margin: 8px 0 10px; padding: 8px 11px;
+  background: rgba(255, 215, 0, 0.08);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  border-radius: 8px; color: #ddd; font-size: 13px;
+}
+#view-home .wallet-num { color: #ffd700; font-size: 16px; font-weight: 800; margin-left: 2px; }
+#view-home .wallet-tip { color: #889; font-size: 11px; margin-left: 5px; }
+
+/* 商店 */
+#view-home .shop-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+#view-home .shop-item { display: flex; align-items: center; gap: 9px; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 9px; }
+#view-home .shop-icon { font-size: 22px; }
+#view-home .shop-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+#view-home .shop-name { color: #fff; font-size: 13px; font-weight: bold; }
+#view-home .shop-desc { color: #9aa0c3; font-size: 11px; line-height: 1.5; }
+#view-home .shop-buy-btn {
+  border: none;
+  background: linear-gradient(90deg, #ffd700, #ff9a44);
+  color: #17172b; font-weight: bold;
+  border-radius: 12px; font-size: 12px; padding: 4px 10px; cursor: pointer;
+}
+#view-home .shop-buy-btn.poor { opacity: 0.4; }
+
+/* 引导层 */
+#view-home .guide-mask {
+  position: fixed; inset: 0; background: rgba(8, 8, 24, 0.88);
+  z-index: 999; display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+#view-home .guide-mask[hidden] { display: none; }
+#view-home .guide-card {
+  width: 100%; max-width: 480px;
+  background: linear-gradient(160deg, #23234a, #17172b);
+  border: 1px solid rgba(255, 215, 0, 0.45);
+  border-radius: 16px; padding: 28px 20px 20px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center;
+}
+#view-home .guide-emoji { font-size: 54px; }
+#view-home .guide-title { color: #ffd700; font-size: 19px; font-weight: bold; }
+#view-home .guide-desc { color: #c7cbe8; font-size: 13px; line-height: 1.7; }
+#view-home .guide-dots { display: flex; gap: 6px; margin-top: 4px; }
+#view-home .guide-dot { width: 7px; height: 7px; border-radius: 4px; background: rgba(255,255,255,0.25); }
+#view-home .guide-dot.on { background: #ffd700; width: 16px; }
+#view-home .guide-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; width: 100%; }
+#view-home .guide-skip { border: none; background: none; color: #8a8fb0; font-size: 13px; padding: 6px 12px; cursor: pointer; }
+#view-home .guide-next { flex: 1; }
+
+/* 地图标记（home 框选编号点） */
+#view-home .map-marker { cursor: pointer; }

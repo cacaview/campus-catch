@@ -99,3 +99,30 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .anim-glow { animation: glow 2s infinite; }
 .anim-fade-in { animation: fadeIn 0.5s ease-in-out; }
 .anim-slide-up { animation: slideUp 0.5s ease-out; }
+
+/* 地图 DOM 标记（MapLibre Marker 元素，home 框选 / game 玩家 / result 回放共用） */
+.map-marker { position: relative; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.map-marker .mm-icon {
+  font-size: 18px; line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+}
+.map-marker .mm-badge {
+  background: var(--mm-color, #ff3366);
+  color: #fff; font-size: 12px; font-weight: 700;
+  border-radius: 8px; padding: 2px 8px; white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  margin-bottom: 2px;
+}
+.map-marker .mm-badge .mm-sub { display: block; font-size: 10px; font-weight: 400; opacity: 0.9; }
+.map-marker.self .mm-badge { font-size: 11px; padding: 1px 6px; }
+.map-marker.highlight .mm-badge {
+  outline: 2px solid #ffd700;
+  transform: scale(1.12);
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.8);
+}
+.map-user-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #2196f3; border: 2px solid #fff;
+  box-shadow: 0 0 6px rgba(33, 150, 243, 0.9);
+  animation: pulse 2s infinite;
+}

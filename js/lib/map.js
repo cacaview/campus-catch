@@ -1,18 +1,22 @@
 // MapLibre 封装：全应用唯一 MapLibre 使用点（home 框选 / game 主地图 / result 回放）
+// 注意：addSource/addLayer 必须等 map 'load' 事件，未就绪的图层操作走缓存，load 后统一应用
 const BASE_TILE = 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
 const SAT_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
 
 class MapView {
-  constructor(map, markerLayer) {
+  constructor(map) {
     this.map = map;
-    this.markerLayer = markerLayer; // DOM 容器（绝对定位覆盖在 map 上）
     this.markers = new Map(); // id → maplibregl.Marker
     this.tapCb = null;
     this.userMarker = null;
+    this._ready = false;
+    this._polygonCache = null;
+    this._linesCache = null;
+    this._satelliteCache = null;
   }
 
-  static create(container, { center = [110.2955, 25.2286], zoom = 16 } = {}) {
+  static create(container, { center = [110.284419, 25.238236], zoom = 16 } = {}) {
     const ml = window.maplibregl;
     const map = new ml.Map({
       container,
@@ -23,6 +27,26 @@ class MapView {
       pitchWithRotate: false
     });
     map.addControl(new ml.AttributionControl({ compact: true }), 'bottom-right');
+
+    const view = new MapView(map);
+    const finish = () => {
+      view._setupLayers();
+      view._ready = true;
+      if (view._polygonCache) view._applyPolygon(view._polygonCache);
+      if (view._linesCache) view._applyLines(view._linesCache);
+      if (view._satelliteCache !== null) view._applySatellite(view._satelliteCache);
+    };
+    if (map.loaded()) finish();
+    else map.once('load', finish);
+
+    map.on('click', e => {
+      if (view.tapCb) view.tapCb({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
+    });
+    return view;
+  }
+
+  _setupLayers() {
+    const map = this.map;
     map.addSource('basemap', {
       type: 'raster',
       tiles: [BASE_TILE],
@@ -59,20 +83,10 @@ class MapView {
       source: 'line-src',
       paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'] }
     });
-
-    // DOM 标记容器：随地图覆盖层定位（maplibre Marker 自带跟随）
-    const markerLayer = document.createElement('div');
-    markerLayer.className = 'map-marker-layer';
-    container.appendChild(markerLayer);
-
-    const view = new MapView(map, markerLayer);
-    map.on('click', e => {
-      if (view.tapCb) view.tapCb({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
-    });
-    return view;
   }
 
   setMarkers(list) {
+    // MapLibre Marker 是 DOM 标记，未 load 也可添加（下一帧自动定位）
     const seen = new Set();
     for (const m of list) {
       seen.add(m.id);
@@ -122,12 +136,22 @@ class MapView {
     el.classList.toggle('highlight', !!m.highlight);
     const badge = el.querySelector('.mm-badge');
     if (badge) {
-      badge.childNodes[0].nodeValue = m.label || '';
       const sub = badge.querySelector('.mm-sub');
-      if (sub) sub.textContent = m.sub || '';
+      if (sub) {
+        // 有 sub 时 label 是 sub 前的文本节点，缺失则补建
+        let labelNode = badge.childNodes[0];
+        if (!labelNode || labelNode.nodeType !== 3) {
+          labelNode = document.createTextNode('');
+          badge.insertBefore(labelNode, sub);
+        }
+        if (labelNode.nodeValue !== (m.label || '')) labelNode.nodeValue = m.label || '';
+        if (sub.textContent !== (m.sub || '')) sub.textContent = m.sub || '';
+      } else if (badge.textContent !== (m.label || '')) {
+        badge.textContent = m.label || '';
+      }
     }
     const icon = el.querySelector('.mm-icon');
-    if (icon) icon.textContent = m.icon || '';
+    if (icon && icon.textContent !== (m.icon || '')) icon.textContent = m.icon || '';
   }
 
   setPolygon(points) {
@@ -135,11 +159,16 @@ class MapView {
       ? points.map(p => [p.longitude, p.latitude])
       : [];
     if (ring.length) ring.push(ring[0]); // 闭合
-    const gj = {
+    this._polygonCache = {
       type: 'FeatureCollection',
       features: ring.length ? [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} }] : []
     };
-    this.map.getSource('polygon-src').setData(gj);
+    if (this._ready) this._applyPolygon(this._polygonCache);
+  }
+
+  _applyPolygon(gj) {
+    const src = this.map.getSource('polygon-src');
+    if (src) src.setData(gj);
   }
 
   setPolylines(lines) {
@@ -148,10 +177,21 @@ class MapView {
       geometry: { type: 'LineString', coordinates: (l.points || []).map(p => [p.longitude, p.latitude]) },
       properties: { color: l.color || '#ffd700', width: l.width || 4 }
     }));
-    this.map.getSource('line-src').setData({ type: 'FeatureCollection', features });
+    this._linesCache = { type: 'FeatureCollection', features };
+    if (this._ready) this._applyLines(this._linesCache);
+  }
+
+  _applyLines(fc) {
+    const src = this.map.getSource('line-src');
+    if (src) src.setData(fc);
   }
 
   setSatellite(on) {
+    this._satelliteCache = !!on;
+    if (this._ready) this._applySatellite(this._satelliteCache);
+  }
+
+  _applySatellite(on) {
     this.map.setLayoutProperty('satellite-layer', 'visibility', on ? 'visible' : 'none');
     this.map.setLayoutProperty('basemap-layer', 'visibility', on ? 'none' : 'visible');
   }
