@@ -1,1 +1,193 @@
-/* Task 8-12 填充 */
+/* css/rank.css — 排行榜（移植 pages/rank/rank.wxss，rpx→px÷2，作用域 #view-rank） */
+#view-rank {
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+#view-rank .rank-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+#view-rank .header {
+  padding: 20px 0 10px;
+  text-align: center;
+}
+#view-rank .title {
+  font-size: 24px;
+  font-weight: bold;
+  color: #ffd700;
+  text-shadow: 0 2px 5px rgba(255, 215, 0, 0.3);
+}
+
+#view-rank .period-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 10px auto 0;
+  width: 92%;
+}
+#view-rank .period-tab {
+  flex: 1;
+  text-align: center;
+  padding: 6px 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #9aa0c3;
+  font-size: 13px;
+  cursor: pointer;
+}
+#view-rank .period-tab.active {
+  background: rgba(255, 215, 0, 0.18);
+  color: #ffd700;
+  font-weight: bold;
+}
+
+#view-rank .my-rank-bar {
+  width: 92%;
+  margin: 8px auto 0;
+  background: rgba(111, 216, 255, 0.1);
+  border: 1px solid rgba(111, 216, 255, 0.3);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: #cfd3f5;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+#view-rank .my-rank-num { color: #6fd8ff; font-weight: bold; font-size: 14px; }
+
+#view-rank .mock-tip {
+  width: 92%;
+  margin: 6px auto 0;
+  color: #8a8fb0;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
+#view-rank .tabs {
+  display: flex;
+  margin: 10px 20px 15px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 4px;
+}
+#view-rank .tab {
+  flex: 1;
+  text-align: center;
+  padding: 8px 0;
+  font-size: 14px;
+  color: #aaa;
+  border-radius: 16px;
+  transition: all 0.3s;
+  cursor: pointer;
+}
+#view-rank .tab.active {
+  background: #333;
+  color: #fff;
+  font-weight: bold;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+#view-rank .rank-list {
+  flex: 1;
+  padding: 0 20px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+#view-rank .rank-item {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 10px 15px;
+  margin-bottom: 10px;
+  transition: all 0.3s;
+  border: 1px solid transparent;
+}
+#view-rank .rank-item.is-me {
+  background: rgba(255, 215, 0, 0.1);
+  border-color: rgba(255, 215, 0, 0.3);
+}
+#view-rank .rank-item.top-1 { background: linear-gradient(90deg, rgba(255, 215, 0, 0.2), rgba(0, 0, 0, 0)); }
+#view-rank .rank-item.top-2 { background: linear-gradient(90deg, rgba(192, 192, 192, 0.2), rgba(0, 0, 0, 0)); }
+#view-rank .rank-item.top-3 { background: linear-gradient(90deg, rgba(205, 127, 50, 0.2), rgba(0, 0, 0, 0)); }
+
+#view-rank .rank-num {
+  width: 30px;
+  font-size: 16px;
+  font-weight: bold;
+  color: #888;
+  text-align: center;
+}
+#view-rank .medal { font-size: 20px; }
+
+#view-rank .avatar-box {
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 10px;
+  flex-shrink: 0;
+}
+#view-rank .avatar { font-size: 20px; }
+
+#view-rank .info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#view-rank .name {
+  font-size: 16px;
+  font-weight: bold;
+  color: #fff;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#view-rank .stats { font-size: 11px; color: #aaa; }
+
+#view-rank .score {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+#view-rank .score-val { font-size: 18px; font-weight: bold; color: #ffd700; }
+#view-rank .score-label { font-size: 10px; color: #888; }
+
+#view-rank .mock-badge {
+  background: rgba(255, 215, 0, 0.16);
+  color: #ffd700;
+  font-size: 9px;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  vertical-align: middle;
+  font-weight: normal;
+}
+
+#view-rank .empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+#view-rank .empty-icon { font-size: 50px; margin-bottom: 15px; }
+#view-rank .empty-text { font-size: 14px; color: #888; margin-bottom: 20px; }
+#view-rank .play-btn {
+  background: linear-gradient(90deg, #ffd700, #ffaa00);
+  color: #000;
+  border-radius: 20px;
+  padding: 10px 30px;
+  font-size: 16px;
+  font-weight: bold;
+}
