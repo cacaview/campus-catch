@@ -1,0 +1,14 @@
+{
+  "name": "catmouse-web-multiplayer-test",
+  "private": true,
+  "type": "module",
+  "description": "多实例联机自测工具（本地联调用，非交付物）：WS 中继 + 模拟 GPS 的第二实例客户端",
+  "scripts": {
+    "relay": "node relay-server.mjs",
+    "player2": "node player2.mjs",
+    "serve": "python3 serve.py"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
