@@ -11,6 +11,9 @@
   --mouse-badge: #33ccff;
 }
 * { box-sizing: border-box; }
+/* hidden 属性必须永远生效：多个组件 CSS 写死 display:flex，specificity 高于 UA 的
+   [hidden] 规则，曾导致空邀请横幅、假「房间已创建」面板、结算空态遮挡榜单等问题 */
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg-dark);

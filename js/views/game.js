@@ -148,7 +148,7 @@ export function create(rootEl, globalStateRef) {
     xrayUntil: 0,
     decoyUntil: 0,
     radarUntil: 0,
-    satellite: false,
+    satellite: true, // 与地图默认一致：卫星底图（街道图 OSM 国内常不可达）
     scanUntil: 0,
     showRankModal: false,
     liveRank: [],
@@ -419,6 +419,26 @@ export function create(rootEl, globalStateRef) {
       renderMarkers();
     };
 
+    // 迟入/重进同步：加入者请求 → 房主回报剩余时间（协议原生的 RECONNECT/SYNC_ROOM_STATE）
+    netHandlers.reconnectRequest = () => {
+      if (!s.isHost || s.gamePhase === 'END') return;
+      networkManager.send(MSG_TYPES.SYNC_ROOM_STATE, {
+        remainingTime: s.remainingTime,
+        durationSeconds: totalDuration
+      });
+    };
+
+    netHandlers.syncRoomState = payload => {
+      if (s.isHost) return; // 只有加入者对齐，房主的时间是权威源
+      const remaining = Number(payload && payload.remainingTime);
+      if (!Number.isFinite(remaining) || remaining <= 0) return;
+      s.remainingTime = Math.min(Math.round(remaining), 7200);
+      if (totalDuration < s.remainingTime) totalDuration = s.remainingTime;
+      s.timerText = formatTime(s.remainingTime);
+      renderHud();
+      addSystemMessage('⏱ 已与房主对齐活动剩余时间');
+    };
+
     networkManager.on('stateChange', netHandlers.stateChange);
     networkManager.on(MSG_TYPES.PLAYER_MOVE, netHandlers.playerMove);
     networkManager.on(MSG_TYPES.CATCH_EVENT, netHandlers.catchEvent);
@@ -426,6 +446,8 @@ export function create(rootEl, globalStateRef) {
     networkManager.on(MSG_TYPES.GAME_PAUSE, netHandlers.gamePause);
     networkManager.on(MSG_TYPES.GAME_EXTEND, netHandlers.gameExtend);
     networkManager.on(MSG_TYPES.PLAYER_KICK, netHandlers.playerKick);
+    networkManager.on(MSG_TYPES.RECONNECT, netHandlers.reconnectRequest);
+    networkManager.on(MSG_TYPES.SYNC_ROOM_STATE, netHandlers.syncRoomState);
   };
 
   const removeNetworkListeners = () => {
@@ -436,6 +458,8 @@ export function create(rootEl, globalStateRef) {
     if (netHandlers.gamePause) networkManager.off(MSG_TYPES.GAME_PAUSE, netHandlers.gamePause);
     if (netHandlers.gameExtend) networkManager.off(MSG_TYPES.GAME_EXTEND, netHandlers.gameExtend);
     if (netHandlers.playerKick) networkManager.off(MSG_TYPES.PLAYER_KICK, netHandlers.playerKick);
+    if (netHandlers.reconnectRequest) networkManager.off(MSG_TYPES.RECONNECT, netHandlers.reconnectRequest);
+    if (netHandlers.syncRoomState) networkManager.off(MSG_TYPES.SYNC_ROOM_STATE, netHandlers.syncRoomState);
     netHandlers = {};
   };
 
@@ -1207,7 +1231,7 @@ export function create(rootEl, globalStateRef) {
     s.xrayUntil = 0;
     s.decoyUntil = 0;
     s.radarUntil = 0;
-    s.satellite = false;
+    s.satellite = true; // 与地图默认一致：卫星底图（街道图 OSM 国内常不可达）
     s.scanUntil = 0;
     s.showRankModal = false;
     s.liveRank = [];
@@ -1225,7 +1249,12 @@ export function create(rootEl, globalStateRef) {
     if (netMode === 'OFFLINE') {
       renderNetStatus('单机模式', 'dot-offline');
     } else {
-      renderNetStatus('服务器联机 🟢', 'dot-online');
+      // 按真实连接状态渲染：stateChange 事件可能在本视图挂监听之前就已发生
+      // （如建房成功瞬间断线又重建视图），不能无条件显示「联机中」
+      const st = networkManager.state;
+      if (st === 'CONNECTED') renderNetStatus('服务器联机 🟢', 'dot-online');
+      else if (st === 'CONNECTING' || st === 'RECONNECTING') renderNetStatus('连接服务器…', 'dot-connecting');
+      else renderNetStatus('连接已断开 🔴', 'dot-disconnected');
     }
 
     // 地图：创建/复用 + 区域多边形 + 视野适配
@@ -1234,6 +1263,10 @@ export function create(rootEl, globalStateRef) {
         center: [s.longitude, s.latitude],
         zoom: 16
       });
+      map.onBasemapFallback = () => {
+        s.satellite = true; // 保持视图切换按钮的状态一致
+        addSystemMessage('📡 街道地图加载失败，已自动切换卫星图');
+      };
     }
     if (GameArea.isValidArea(gameArea)) {
       map.setPolygon(gameArea.points);
@@ -1265,6 +1298,10 @@ export function create(rootEl, globalStateRef) {
       addSystemMessage('已进入单机模式，AI 玩家就位，地图刷新奶酪打卡点！');
     } else {
       addSystemMessage(`已进入 [${netMode}] 联机模式，全员 GPS 坐标实时同步！`);
+      // 迟入者向房主要当前剩余时间：中途进房/重进时本端从满时长倒数会与房主脱节
+      if (!isHost) {
+        networkManager.send(MSG_TYPES.RECONNECT, { reason: 'sync-timer' });
+      }
     }
     renderMarkers();
 

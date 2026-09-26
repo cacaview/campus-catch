@@ -522,6 +522,7 @@ export function create(rootEl, globalStateRef) {
     const gameDurationSeconds = durationMinutes * 60;
 
     globalStateRef.currentPlayer = playerInfo;
+    setStorage('lastNickname', nickname); // 与 startGame 对齐：建房路径也要记住昵称
     globalStateRef.netMode = 'SERVER';
     roomSession.createRoom(playerInfo, passcode, gameArea, gameDurationSeconds);
     globalStateRef.gameArea = gameArea;
@@ -599,8 +600,39 @@ export function create(rootEl, globalStateRef) {
       serverUrl = url;
 
       if (createdRoomPasscode) {
-        // 房主已进入房间，直接开局
-        navigate('game');
+        // 房主复用已建房间：连接还活着就直接开局；
+        // 已断开（如上一局结束 onHide 断连）则先重连房间再进局
+        if (networkManager.state === 'CONNECTED') {
+          navigate('game');
+          return;
+        }
+        showLoading({ title: '正在连接服务器...' });
+        startJoinWatchdog('连接服务器');
+        ensureJoinEventsBound();
+        roomSession.isHost = true;
+        roomSession.myPlayer = globalStateRef.currentPlayer;
+        roomSession.passcode = createdRoomPasscode;
+        networkManager.connectServer(
+          serverUrl,
+          globalStateRef.currentPlayer,
+          createdRoomPasscode,
+          globalStateRef.gameArea,
+          globalStateRef.gameDurationSeconds
+        )
+          .then(() => {
+            hideLoading();
+            clearJoinWatchdog();
+            // 进局导航统一由 joinSuccess 处理：这里再 navigate('game') 会叠加第二次
+            // 导航，触发路由同视图重建（onHide → networkManager.disconnect()），
+            // 房间刚建好就被静默断线
+          })
+          .catch(() => {
+            hideLoading();
+            clearJoinWatchdog();
+            showToast({ title: '无法连接服务器，已降级为单机试玩', icon: 'none' });
+            globalStateRef.netMode = 'OFFLINE';
+            setTimeout(() => navigate('game'), 1000);
+          });
         return;
       }
 
@@ -621,7 +653,9 @@ export function create(rootEl, globalStateRef) {
         .then(() => {
           hideLoading();
           clearJoinWatchdog();
-          navigate('game');
+          // 进局导航统一由 joinSuccess 事件处理：connectServer 成功 + joinSuccess
+          // 各导航一次会造成同视图重建（onHide → networkManager.disconnect()），
+          // 加入者会带着假「服务器联机」状态全程离线
         })
         .catch(() => {
           hideLoading();

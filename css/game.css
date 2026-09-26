@@ -154,7 +154,9 @@
 /* 聊天面板 */
 #view-game .chat-wrapper {
   position: absolute; left: 10px;
-  bottom: calc(150px + env(safe-area-inset-bottom));
+  /* 底部锚点必须高于技能条（bottom 60px + height 130px = 顶沿 190px），
+     否则聊天输入栏与 ⌨️ 切换按钮落进技能条命中区，无法点击 */
+  bottom: calc(195px + env(safe-area-inset-bottom));
   width: 65%; z-index: 10; pointer-events: none;
 }
 #view-game .chat-container {

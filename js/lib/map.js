@@ -1,6 +1,10 @@
 // MapLibre 封装：全应用唯一 MapLibre 使用点（home 框选 / game 主地图 / result 回放）
 // 注意：addSource/addLayer 必须等 map 'load' 事件，未就绪的图层操作走缓存，load 后统一应用
-const BASE_TILE = 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+// 底图瓦片（两个都免 key、WGS-84 与 GPS 对齐）：
+//   默认卫星图 Esri World_Imagery —— 国内网络可直连；
+//   街道图 OSM —— 作为可切换样式，国内可能不可达，连续加载失败自动回退卫星图
+//   （CARTO 免 key 瓦片 2026-09 起强制 API key，返回 "API KEY REQUIRED" 占位图，已弃用）
+const BASE_TILE = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const SAT_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
 
@@ -13,7 +17,8 @@ class MapView {
     this._ready = false;
     this._polygonCache = null;
     this._linesCache = null;
-    this._satelliteCache = null;
+    this._satelliteCache = true; // 默认卫星图：street 图（OSM）在国内网络常不可达
+    this.onBasemapFallback = null; // 街道图加载失败自动回退时通知视图层提示用户
   }
 
   static create(container, { center = [110.284419, 25.238236], zoom = 16 } = {}) {
@@ -22,6 +27,9 @@ class MapView {
       container,
       center,
       zoom,
+      // 必须提供 style：MapLibre 对无 style 的地图不会调度任何渲染帧，
+      // load 事件永不触发，后续 addSource/addLayer（含瓦片底图）永远挂不上
+      style: { version: 8, sources: {}, layers: [] },
       attributionControl: false,
       dragRotate: false,
       pitchWithRotate: false
@@ -29,6 +37,7 @@ class MapView {
     map.addControl(new ml.AttributionControl({ compact: true }), 'bottom-right');
 
     const view = new MapView(map);
+    view._setupBadgeClamp();
     const finish = () => {
       view._setupLayers();
       view._ready = true;
@@ -51,7 +60,7 @@ class MapView {
       type: 'raster',
       tiles: [BASE_TILE],
       tileSize: 256,
-      attribution: '©OpenStreetMap contributors ©CARTO'
+      attribution: '©OpenStreetMap contributors'
     });
     map.addLayer({ id: 'basemap-layer', type: 'raster', source: 'basemap' });
     map.addSource('satellite', {
@@ -61,7 +70,12 @@ class MapView {
       attribution: 'Esri, Maxar'
     });
     map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite' }, 'basemap-layer');
-    map.getLayer('satellite-layer').setLayoutProperty('visibility', 'none');
+    // 默认显示卫星图，街道图（OSM）隐藏为可切换样式；隐藏图层不请求瓦片
+    map.getLayer('basemap-layer').setLayoutProperty('visibility', 'none');
+    // 街道图瓦片在部分网络（国内）不可达：连续失败自动回退卫星图
+    this._basemapErrors = 0;
+    this._basemapFallbackFired = false;
+    map.on('error', e => this._handleBasemapError(e));
 
     map.addSource('polygon-src', { type: 'geojson', data: EMPTY_GJ });
     map.addLayer({
@@ -108,6 +122,28 @@ class MapView {
         this.markers.delete(id);
       }
     }
+    // 等 maplibre 完成本帧定位后再做一次边缘收敛
+    if (this._clampFn) setTimeout(this._clampFn, 0);
+  }
+
+  _setupBadgeClamp() {
+    // 视口边缘标签防裁切：标记贴近地图容器边缘时，把文字 badge 平移回可见范围
+    const clamp = () => {
+      const cr = this.map.getContainer().getBoundingClientRect();
+      if (!cr.width) return;
+      const shift = el => {
+        const badge = el.querySelector('.mm-badge');
+        if (!badge) return;
+        const br = badge.getBoundingClientRect();
+        let dx = 0;
+        if (br.left < cr.left) dx = cr.left - br.left + 4;
+        else if (br.right > cr.right) dx = cr.right - br.right - 4;
+        badge.style.transform = dx ? `translateX(${Math.round(dx)}px)` : '';
+      };
+      this.markers.forEach(mk => shift(mk.getElement()));
+    };
+    this.map.on('move', clamp);
+    this._clampFn = clamp;
   }
 
   _makeMarkerEl(m) {
@@ -189,6 +225,17 @@ class MapView {
   setSatellite(on) {
     this._satelliteCache = !!on;
     if (this._ready) this._applySatellite(this._satelliteCache);
+  }
+
+  _handleBasemapError(e) {
+    if (this._basemapFallbackFired) return;
+    const src = e && (e.sourceId || (e.source && e.source.id));
+    if (src !== 'basemap' || this._satelliteCache) return; // 卫星图状态下街道层不可见、不加载
+    this._basemapErrors++;
+    if (this._basemapErrors < 3) return; // 容忍偶发失败
+    this._basemapFallbackFired = true;
+    this.setSatellite(true);
+    if (typeof this.onBasemapFallback === 'function') this.onBasemapFallback();
   }
 
   _applySatellite(on) {
