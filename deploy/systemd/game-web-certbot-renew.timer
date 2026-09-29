@@ -1,0 +1,12 @@
+[Unit]
+Description=Check the Web game IP certificate for renewal every six hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+RandomizedDelaySec=10min
+Persistent=true
+Unit=game-web-certbot-renew.service
+
+[Install]
+WantedBy=timers.target

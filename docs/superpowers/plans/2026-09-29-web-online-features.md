@@ -195,16 +195,16 @@ Expected: all unit tests pass. In a browser, the checklist's existing single-pla
 - Relay environment keys: `PORT=8081`, `HOST=127.0.0.1`, `PUBLIC_IP=106.53.199.187`, and a server-only `TURN_SECRET`.
 - Coturn uses shared-secret auth, public/private address mapping, listeners on UDP/TCP 3478, and UDP relay ports 49160–49200.
 
-- [ ] **Step 1: Write the deploy runbook** with package requirements, filesystem ownership, server-only secret creation, certificate command, service start order, renewal timer/hook, and cloud security-group ports.
-- [ ] **Step 2: Add Nginx and systemd configs** for static hosting, HTTP ACME challenges, HTTPS redirects, `/healthz`, `/ws` upgrade headers, `/api/` proxy, loopback-only relay, a dedicated unprivileged relay account, and restart-on-failure.
-- [ ] **Step 3: Add the Coturn example config** with placeholders for public/private IP and shared secret, not actual credentials.
-- [ ] **Step 4: Review config syntax locally where supported** and ensure no certificate key, TURN secret, or private address credential is tracked.
+- [x] **Step 1: Write the deploy runbook** with package requirements, filesystem ownership, server-only secret creation, certificate command, service start order, renewal timer/hook, and cloud security-group ports.
+- [x] **Step 2: Add Nginx and systemd configs** for static hosting, HTTP ACME challenges, HTTPS redirects, `/healthz`, `/ws` upgrade headers, `/api/` proxy, loopback-only relay, a dedicated unprivileged relay account, and restart-on-failure.
+- [x] **Step 3: Add the Coturn example config** with placeholders for public/private IP and shared secret, not actual credentials.
+- [x] **Step 4: Review config syntax locally where supported** and ensure no certificate key, TURN secret, or private address credential is tracked. Nginx, systemd-analyze, and nft syntax tools are not installed locally; remote syntax checks remain part of Task 6.
 
 Run: `git diff --check`
 
 Expected: no whitespace issues; repository config contains placeholders only and uses the spec's exact ports/paths.
 
-- [ ] **Step 5: Commit deployment configuration and runbook.**
+- [x] **Step 5: Commit deployment configuration and runbook.**
 
 ### Task 6: Deploy on the Debian server and verify the public service
 
@@ -221,8 +221,8 @@ Expected: no whitespace issues; repository config contains placeholders only and
 - [ ] **Step 1: Recheck the remote OS and firewall prerequisites** before installing packages and verify key-only SSH. Confirm the cloud security group allows TCP 22, 80, and 443; TCP and UDP 3478; and UDP 49160–49200. Preserve TCP 22 throughout. If the cloud rule cannot be changed here and a required port is blocked, stop before deployment and report the exact rule needed.
 - [ ] **Step 2: Install Node.js, Nginx, Coturn, nftables, and Certbot 5.4+** on Debian 13; keep relay and TURN secrets in a root-owned mode-`0600` environment file.
 - [ ] **Step 3: Deploy the Web app and relay** into `/var/www/game-web` and `/opt/game-web/server`, install production dependencies, configure TURN's public/private IP mapping, and start the HTTP-only Nginx ACME challenge configuration.
-- [ ] **Step 4: Request an ACME staging IP certificate first** with Certbot's `--webroot`, `--ip-address 106.53.199.187`, and `--preferred-profile shortlived`; confirm HTTP-01 reachability, then request the production certificate and enable automatic renewal plus Nginx reload hook.
-- [ ] **Step 5: Configure the host firewall with nftables** to allow established traffic, loopback, TCP 22/80/443, TCP+UDP 3478, and UDP 49160–49200, with a default-deny inbound policy. Keep the current SSH session open, establish and verify a second SSH session, then enable and persist the rules. Confirm the public ports are reachable before proceeding.
+- [ ] **Step 4: Configure the host firewall with nftables** to allow established traffic, loopback, TCP 22/80/443, TCP+UDP 3478, and UDP 49160–49200, with a default-deny inbound policy. Keep the current SSH session open, establish and verify a second SSH session, then enable and persist the rules. Confirm the public ports are reachable before proceeding.
+- [ ] **Step 5: Request an ACME staging IP certificate first** with Certbot's `--webroot`, `--ip-address 106.53.199.187`, and `--preferred-profile shortlived`; confirm HTTP-01 reachability, then request the production certificate and enable automatic renewal plus Nginx reload hook.
 - [ ] **Step 6: Install the full HTTPS/WSS Nginx config** and validate it with `nginx -t`; validate the systemd unit with `systemd-analyze verify`, then enable Coturn, relay, Nginx, and renewal services.
 - [ ] **Step 7: Verify public HTTPS, certificate SAN/expiry, `/healthz`, WSS handshake, same-room chat, different-room isolation, `/api/ice-config` expiry, and systemd/timer status.**
 - [ ] **Step 8: Run two-client browser checks on separate devices or networks** for real audio, channel isolation, roster counts, mute, leave, and permission denial. If available clients or microphone permissions prevent real-audio verification, report the remaining manual check clearly.

@@ -1,0 +1,33 @@
+[Unit]
+Description=Web game room relay and TURN configuration endpoint
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=game-web
+Group=game-web
+WorkingDirectory=/opt/game-web/server
+EnvironmentFile=/etc/game-web-relay.env
+ExecStart=/usr/bin/node /opt/game-web/server/relay.js
+Restart=on-failure
+RestartSec=3s
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the Web game IP certificate with Certbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/certbot/bin/certbot renew --quiet

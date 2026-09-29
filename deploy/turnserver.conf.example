@@ -1,0 +1,17 @@
+# Copy to /etc/turnserver.conf and replace placeholders before starting Coturn.
+listening-port=3478
+listening-ip=10.1.0.13
+relay-ip=10.1.0.13
+external-ip=106.53.199.187/10.1.0.13
+
+min-port=49160
+max-port=49200
+
+realm=106.53.199.187
+use-auth-secret
+static-auth-secret=REPLACE_WITH_TURN_SECRET_FROM_game-web-relay.env
+fingerprint
+
+no-cli
+no-loopback-peers
+no-multicast-peers
