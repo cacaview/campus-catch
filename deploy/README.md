@@ -16,6 +16,8 @@
 
 Node relay 只监听 `127.0.0.1:8081`，不开放公网端口。WebRTC 音频在浏览器之间直接传输；无法直连时使用 Coturn。
 
+公网 ICE 配置按来源 IP 限流，每次签发使用独立临时账号；Coturn 限制每个临时账号 8 个 allocation、全服 64 个 allocation，每个 session 上行/下行各限 64,000 bytes/s，避免匿名访客无限消耗 TURN 资源。
+
 ## 1. 安装系统依赖
 
 在 Debian 13 上以 root 执行：
@@ -139,7 +141,7 @@ systemctl enable nftables
 nft list ruleset
 ```
 
-规则只放通 SSH、HTTP(S)、STUN/TURN 控制端口及指定 UDP relay 范围，其余入站流量默认丢弃。若 SSH 使用非 22 端口，必须先把对应端口加入配置并重新检查，不能先应用默认规则。
+该 input 基础链执行主机级默认拒绝策略：未列出的入站端口会被丢弃，即使其他表允许也一样；本配置用于这台独立游戏服务器，其他服务需要入站时应先补入白名单。规则放通 SSH、HTTP(S)、STUN/TURN 控制端口及指定 UDP relay 范围。配置只销毁并重建 `inet game_web` 表，不清空机器上的其他 nftables 表。若 SSH 使用非 22 端口，必须先把对应端口加入配置并重新检查，不能先应用默认规则。
 
 ## 5. 先启动 HTTP-01 challenge 站点
 

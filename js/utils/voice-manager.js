@@ -157,13 +157,14 @@ export class VoiceManager {
       this.stream = stream;
       this.iceConfig = iceConfig;
       const result = new Promise(resolve => {
-        this.joinWaiter = { generation, channel, resolve };
+        this.joinWaiter = { generation, channel, resolve, requestSent: true };
       });
       this.joinTimeout = setTimeout(() => {
         if (this.joinWaiter?.generation === generation) this._failJoin(generation, '语音连接超时，请重试');
       }, JOIN_TIMEOUT_MS);
       const sent = this.networkManager.send(MSG_TYPES.VOICE_JOIN, { channel });
       if (!sent) {
+        if (this.joinWaiter?.generation === generation) this.joinWaiter.requestSent = false;
         this._failJoin(generation, '联机已断开，请重新加入语音');
       }
       return result;
@@ -218,7 +219,8 @@ export class VoiceManager {
     this.joinWaiter = null;
     waiter?.resolve({ ok: false, error: error || CANCELLED });
 
-    if (sendLeave && channel && this._state === 'IN_CALL' && this._isNetworkConnected()) {
+    const pendingJoinWasSent = waiter?.requestSent && waiter.channel === channel;
+    if (sendLeave && channel && (this._state === 'IN_CALL' || pendingJoinWasSent) && this._isNetworkConnected()) {
       this.networkManager.send(MSG_TYPES.VOICE_LEAVE, { channel });
     }
     this._releaseMedia();
@@ -239,6 +241,9 @@ export class VoiceManager {
     const waiter = this.joinWaiter;
     this.joinWaiter = null;
     waiter?.resolve({ ok: false, error: message });
+    if (waiter?.requestSent && this._isNetworkConnected()) {
+      this.networkManager.send(MSG_TYPES.VOICE_LEAVE, { channel: waiter.channel });
+    }
     this._releaseMedia();
     this.channel = null;
     this.members = [];

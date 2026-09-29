@@ -228,6 +228,14 @@ Expected: no whitespace issues; repository config contains placeholders only and
 - [ ] **Step 8: Run two-client browser checks on separate devices or networks** for real audio, channel isolation, roster counts, mute, leave, and permission denial. The real microphone/media check remains manual because no second device was available and browser microphone permission was not granted.
 - [x] **Step 9: Record actual deployment results** in the checklist and README, then commit deployment notes only after checking them against the live server.
 
+### Post-deployment review hardening (2026-09-29)
+
+- [x] Keep a room registered when its only member reconnects; add a relay regression test and verify the behavior against the public WSS endpoint.
+- [x] Send `VOICE_LEAVE` when a pending server voice join is canceled or times out; verify the cancellation path and stop local media tracks.
+- [x] Limit public ICE credential requests per source IP, issue a unique temporary TURN username per config grant, and bound Coturn per-user/total allocations and per-session bandwidth.
+- [x] Replace only the project-owned nftables table; validate the rules and establish a fresh SSH connection after applying them.
+- [ ] Verify real two-device WebRTC media with microphone permission; retain as a manual check.
+
 ## Plan Self-Review
 
 - **Spec coverage:** UI, room chat, plain-text rendering, signaling, room/team isolation, voice limit, cleanup, Coturn short credentials, HTTPS/WSS, IP certificate renewal, systemd, firewall ports, and ephemeral state each map to Tasks 1–6.

@@ -255,6 +255,22 @@ test('leaveCancelsPendingJoinAndStopsTracks', async () => {
   assert.equal(h.networkManager.sent.some(message => message.type === MSG_TYPES.VOICE_JOIN), false);
 });
 
+test('leaving after VOICE_JOIN cancels the pending server membership', async () => {
+  const h = harness();
+  const pending = h.manager.join('global');
+  await tick();
+  assert.equal(h.manager.snapshot.state, 'JOINING');
+  assert.equal(h.networkManager.sent.some(message => message.type === MSG_TYPES.VOICE_JOIN), true);
+
+  await h.manager.leave();
+
+  assert.equal(h.networkManager.sent.some(message => message.type === MSG_TYPES.VOICE_LEAVE), true);
+  assert.deepEqual(await pending, { ok: false, error: '语音加入已取消' });
+  h.networkManager.emit(MSG_TYPES.VOICE_ROSTER, { channel: 'global', members: [h.manager.player] });
+  assert.equal(h.manager.snapshot.state, 'IDLE');
+  assert.equal(h.stream.getTracks()[0].stopCount, 1);
+});
+
 test('networkDisconnectStopsTracksAndRequiresManualRejoin', async () => {
   const h = harness();
   await enterVoice(h, 'global', [player('player-a'), player('player-b', 'mouse')]);

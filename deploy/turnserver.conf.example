@@ -15,3 +15,9 @@ fingerprint
 no-cli
 no-loopback-peers
 no-multicast-peers
+
+# Keep relay use bounded for this small server; a full 8-player voice channel
+# can create up to seven peer allocations per player.
+user-quota=8
+total-quota=64
+max-bps=64000

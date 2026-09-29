@@ -12,6 +12,10 @@ class FakeSocket {
     this.sent.push(JSON.parse(raw));
   }
 
+  close() {
+    this.readyState = 3;
+  }
+
   packets(type) {
     return this.sent.filter(packet => packet.type === type);
   }
@@ -60,6 +64,19 @@ test('usesJoinedIdentityForChat', () => {
 
   assert.equal(receiver.packets('CHAT_MESSAGE')[0].payload.sender, 'Player sender');
   assert.equal(receiver.packets('CHAT_MESSAGE')[0].senderId, 'sender');
+});
+
+test('reconnecting sole room member keeps the room registered', () => {
+  const registry = new RoomRegistry();
+  const original = joined(registry, 'same-player', '1234');
+
+  const reconnected = joined(registry, 'same-player', '1234');
+  const nextPlayer = joined(registry, 'next-player', '1234', 'mouse');
+
+  assert.equal(original.readyState, 3);
+  assert.equal(registry.rooms.has('1234'), true);
+  assert.equal(nextPlayer.packets('JOIN_ACK').at(-1)?.payload.members.length, 2);
+  assert.equal(reconnected.packets('PLAYER_LEFT').length, 0);
 });
 
 test('forwardsExistingGameplayPacketsWithinRoom', () => {

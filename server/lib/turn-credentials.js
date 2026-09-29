@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 
 export function createIceConfig({ publicIp, sharedSecret, nowMs = Date.now(), ttlSeconds = 3600 } = {}) {
@@ -12,7 +12,7 @@ export function createIceConfig({ publicIp, sharedSecret, nowMs = Date.now(), tt
   if (!Number.isFinite(ttl) || ttl < 1) throw new Error('TURN credential lifetime must be positive');
 
   const expiresAt = Math.floor(Number(nowMs) / 1000) + ttl;
-  const username = `${expiresAt}:campus-catch`;
+  const username = `${expiresAt}:${randomBytes(12).toString('hex')}:campus-catch`;
   const credential = createHmac('sha1', sharedSecret).update(username).digest('base64');
 
   return {

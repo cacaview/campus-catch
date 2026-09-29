@@ -37,6 +37,7 @@
 
 | 项目 | 结果 | 说明 |
 |------|------|------|
+| 自动化测试 | ✅ | `node --test test/*.test.js server/test/*.test.js`：93/93 通过 |
 | HTTPS 与证书 | ✅ | 公网 HTTPS 返回 200；Let's Encrypt 证书 SAN 为 IP `106.53.199.187`，有效至 2026-10-06 |
 | Nginx、relay、Coturn | ✅ | Nginx 配置通过 `nginx -t`；relay `/healthz` 返回 `{"status":"ok"}`；Coturn 服务运行 |
 | ICE 配置 | ✅ | 公网 `/api/ice-config` 返回 STUN/TURN 3 个 URL、短期凭证与到期时间 |
@@ -44,6 +45,10 @@
 | 公网 STUN | ✅ | 向 `106.53.199.187:3478/UDP` 发送 Binding 请求，收到匹配事务 ID 的成功响应 |
 | TURN 媒体与真实音频 | ⬜ | 需在两台设备上加入语音频道并允许麦克风；本轮未授予浏览器麦克风权限，因此未验证真实音频及 TURN allocation |
 | 自动续签 dry-run | ✅ | `certbot renew --dry-run --cert-name 106.53.199.187` 完成，staging 模拟续签成功 |
+| ICE 凭证滥用限制 | ✅ | Nginx 对 `/api/ice-config` 按来源 IP 限为 60 次/分钟、突发 30 次；每份凭证用户名独立，Coturn 每用户 8、全服 64 个 allocation 及每 session 64,000 bytes/s |
+| nftables 更新安全 | ✅ | 使用独立 `inet game_web` 表；配置检查和更新后全新 SSH 连接均成功 |
+| 断线重连房间 | ✅ | 公网 3 客户端烟雾检查覆盖唯一成员重连后房间仍可加入、同房聊天及服务端发送者身份 |
+| 语音加入中途退出 | ✅ | 自动化回归检查确认发送 `VOICE_JOIN` 后退出会发 `VOICE_LEAVE`，忽略迟到 roster 并停止麦克风轨道 |
 
 ## 环境备注
 

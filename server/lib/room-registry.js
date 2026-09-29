@@ -123,7 +123,11 @@ export class RoomRegistry {
       team
     };
     const previous = room.members.get(playerId);
-    if (previous && previous !== state) this.removeConnection(previous.ws);
+    if (previous && previous !== state) {
+      this.removeConnection(previous.ws);
+      if (this.rooms.get(passcode) !== room) this.rooms.set(passcode, room);
+      try { previous.ws.close?.(4001, 'Player reconnected'); } catch { /* Ignore an already-closed socket. */ }
+    }
     state.room = room;
     state.player = player;
     state.voiceChannel = null;
