@@ -1,0 +1,11 @@
+{
+  "name": "campus-catch-web-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
