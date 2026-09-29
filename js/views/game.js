@@ -307,16 +307,34 @@ export function create(rootEl, globalStateRef) {
   };
 
   const renderChat = () => {
-    $('game-chat-list').innerHTML = s.chatMessages.map(m =>
-      `<div class="message-item ${m.type === 'notification' ? 'notification' : 'chat'}">
-         <div class="message-content">
-           <span class="prefix">${m.type === 'notification' ? '📢' : '💬'}</span>
-           ${m.type === 'chat' ? `<span class="sender">${m.sender}:</span>` : ''}
-           <span class="text">${m.text}</span>
-         </div>
-       </div>`).join('');
-    $('game-chat-scroll').classList.toggle('has-msg', s.chatMessages.length > 0);
     const list = $('game-chat-list');
+    list.textContent = '';
+    s.chatMessages.forEach(message => {
+      const item = document.createElement('div');
+      item.className = `message-item ${message.type === 'notification' ? 'notification' : 'chat'}`;
+      const content = document.createElement('div');
+      content.className = 'message-content';
+
+      const prefix = document.createElement('span');
+      prefix.className = 'prefix';
+      prefix.textContent = message.type === 'notification' ? '📢' : '💬';
+      content.appendChild(prefix);
+
+      if (message.type === 'chat') {
+        const sender = document.createElement('span');
+        sender.className = 'sender';
+        sender.textContent = `${String(message.sender ?? '')}:`;
+        content.appendChild(sender);
+      }
+
+      const text = document.createElement('span');
+      text.className = 'text';
+      text.textContent = String(message.text ?? '');
+      content.appendChild(text);
+      item.appendChild(content);
+      list.appendChild(item);
+    });
+    $('game-chat-scroll').classList.toggle('has-msg', s.chatMessages.length > 0);
     list.scrollTop = list.scrollHeight;
   };
 

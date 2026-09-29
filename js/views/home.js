@@ -11,6 +11,7 @@ import { getStablePlayerId } from '../utils/player-identity.js';
 import { Protocol } from '../utils/network/protocol.js';
 import { networkManager } from '../utils/network/network-manager.js';
 import { roomSession } from '../utils/network/room-session.js';
+import { DEFAULT_RELAY_URL } from '../config.js';
 
 const GUIDE_SLIDES = [
   {
@@ -222,6 +223,7 @@ export function create(rootEl, globalStateRef) {
   let durationMinutes = 10;
   let createdRoomPasscode = '';
   let serverUrl = '';
+  let serverUrlTouched = false;
   let joinPasscode = '';   // 加入链接带入的身份码（加入者用）
   let guideStep = 0;
   let showRules = false;
@@ -687,10 +689,16 @@ export function create(rootEl, globalStateRef) {
       globalStateRef.challengeInvite = { ...q.challenge, myTeam: q.challenge.team === 'cat' ? 'mouse' : 'cat' };
       renderChallenge();
     }
+    const serverUrlInput = $('home-server-url');
+    if (q.server && !serverUrlTouched) {
+      serverUrl = q.server;
+      serverUrlInput.value = q.server;
+    } else if (!serverUrlTouched && !serverUrlInput.value.trim()) {
+      serverUrl = DEFAULT_RELAY_URL;
+      serverUrlInput.value = DEFAULT_RELAY_URL;
+    }
     if (q.server) {
       netMode = 'SERVER';
-      serverUrl = q.server;
-      $('home-server-url').value = serverUrl;
       if (q.passcode) {
         joinPasscode = q.passcode;
         showToast({ title: `已带入房间身份码 ${q.passcode}`, icon: 'none' });
@@ -735,6 +743,10 @@ export function create(rootEl, globalStateRef) {
     $('home-nickname').addEventListener('input', e => {
       nickname = e.target.value.trim();
       renderChecklist();
+    });
+    $('home-server-url').addEventListener('input', e => {
+      serverUrlTouched = true;
+      serverUrl = e.target.value.trim();
     });
 
     $('home-area-undo').addEventListener('click', () => setAreaPoints(rawPoints.slice(0, -1)));
