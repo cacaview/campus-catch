@@ -24,6 +24,15 @@ python3 -m http.server 8123
 
 服务器由 Nginx 提供 HTTPS/WSS 与静态文件，Node relay 仅绑定 `127.0.0.1:8081`，Coturn 转发 WebRTC 媒体。部署、证书续签、主机防火墙与运维步骤见 [`deploy/README.md`](deploy/README.md)。生产密钥只保存在服务器的 root-only 文件中，不放入 Web 目录或仓库。
 
+生产 IP 证书为短期证书，续签 timer 每 6 小时检查一次。服务器上可用以下命令重启服务或查看续签时间：
+
+```sh
+systemctl restart game-web-relay.service
+systemctl reload nginx
+systemctl restart coturn
+systemctl list-timers game-web-certbot-renew.timer
+```
+
 ## 真实定位与联机说明
 
 - 真实定位需要 HTTPS 和用户允许浏览器定位。拒绝定位或桌面环境会使用模拟移动。

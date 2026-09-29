@@ -218,15 +218,15 @@ Expected: no whitespace issues; repository config contains placeholders only and
 - Public ICE configuration: `https://106.53.199.187/api/ice-config`.
 - Server process: systemd unit `game-web-relay.service`; Coturn managed by its systemd unit; Nginx serves TLS and static assets.
 
-- [ ] **Step 1: Recheck the remote OS and firewall prerequisites** before installing packages and verify key-only SSH. Confirm the cloud security group allows TCP 22, 80, and 443; TCP and UDP 3478; and UDP 49160–49200. Preserve TCP 22 throughout. If the cloud rule cannot be changed here and a required port is blocked, stop before deployment and report the exact rule needed.
-- [ ] **Step 2: Install Node.js, Nginx, Coturn, nftables, and Certbot 5.4+** on Debian 13; keep relay and TURN secrets in a root-owned mode-`0600` environment file.
-- [ ] **Step 3: Deploy the Web app and relay** into `/var/www/game-web` and `/opt/game-web/server`, install production dependencies, configure TURN's public/private IP mapping, and start the HTTP-only Nginx ACME challenge configuration.
-- [ ] **Step 4: Configure the host firewall with nftables** to allow established traffic, loopback, TCP 22/80/443, TCP+UDP 3478, and UDP 49160–49200, with a default-deny inbound policy. Keep the current SSH session open, establish and verify a second SSH session, then enable and persist the rules. Confirm the public ports are reachable before proceeding.
-- [ ] **Step 5: Request an ACME staging IP certificate first** with Certbot's `--webroot`, `--ip-address 106.53.199.187`, and `--preferred-profile shortlived`; confirm HTTP-01 reachability, then request the production certificate and enable automatic renewal plus Nginx reload hook.
-- [ ] **Step 6: Install the full HTTPS/WSS Nginx config** and validate it with `nginx -t`; validate the systemd unit with `systemd-analyze verify`, then enable Coturn, relay, Nginx, and renewal services.
-- [ ] **Step 7: Verify public HTTPS, certificate SAN/expiry, `/healthz`, WSS handshake, same-room chat, different-room isolation, `/api/ice-config` expiry, and systemd/timer status.**
-- [ ] **Step 8: Run two-client browser checks on separate devices or networks** for real audio, channel isolation, roster counts, mute, leave, and permission denial. If available clients or microphone permissions prevent real-audio verification, report the remaining manual check clearly.
-- [ ] **Step 9: Record actual deployment results** in the checklist and README, then commit deployment notes only after checking them against the live server.
+- [x] **Step 1: Recheck the remote OS and firewall prerequisites** before installing packages and verify key-only SSH. Confirm the cloud security group allows TCP 22, 80, and 443; TCP and UDP 3478; and UDP 49160–49200. Preserve TCP 22 throughout. If the cloud rule cannot be changed here and a required port is blocked, stop before deployment and report the exact rule needed.
+- [x] **Step 2: Install Node.js, Nginx, Coturn, nftables, and Certbot 5.4+** on Debian 13; keep relay and TURN secrets in a root-owned mode-`0600` environment file.
+- [x] **Step 3: Deploy the Web app and relay** into `/var/www/game-web` and `/opt/game-web/server`, install production dependencies, configure TURN's public/private IP mapping, and start the HTTP-only Nginx ACME challenge configuration.
+- [x] **Step 4: Configure the host firewall with nftables** to allow established traffic, loopback, TCP 22/80/443, TCP+UDP 3478, and UDP 49160–49200, with a default-deny inbound policy. Keep the current SSH session open, establish and verify a second SSH session, then enable and persist the rules. Confirm the public ports are reachable before proceeding.
+- [x] **Step 5: Request an ACME staging IP certificate first** with Certbot's `--webroot`, `--ip-address 106.53.199.187`, and `--preferred-profile shortlived`; confirm HTTP-01 reachability, then request the production certificate and enable automatic renewal plus Nginx reload hook.
+- [x] **Step 6: Install the full HTTPS/WSS Nginx config** and validate it with `nginx -t`; validate the systemd unit with `systemd-analyze verify`, then enable Coturn, relay, Nginx, and renewal services.
+- [x] **Step 7: Verify public HTTPS, certificate SAN/expiry, `/healthz`, WSS handshake, same-room chat, different-room isolation, `/api/ice-config` expiry, and systemd/timer status.**
+- [ ] **Step 8: Run two-client browser checks on separate devices or networks** for real audio, channel isolation, roster counts, mute, leave, and permission denial. The real microphone/media check remains manual because no second device was available and browser microphone permission was not granted.
+- [x] **Step 9: Record actual deployment results** in the checklist and README, then commit deployment notes only after checking them against the live server.
 
 ## Plan Self-Review
 
