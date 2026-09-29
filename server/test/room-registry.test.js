@@ -109,6 +109,30 @@ test('updatesRosterOnJoinAndLeave', () => {
   assert.equal(first.packets('VOICE_PEER_LEFT').at(-1)?.payload.playerId, 'second');
 });
 
+test('reportsRoomVoiceChannelCountsAndBroadcastsChanges', () => {
+  const registry = new RoomRegistry();
+  const globalMember = joined(registry, 'global-member');
+  const catMember = joined(registry, 'cat-member', '1234', 'cat');
+  const observer = joined(registry, 'observer', '1234', 'mouse');
+  const otherRoom = joined(registry, 'other-room', '9999', 'cat');
+  for (const socket of [globalMember, catMember, observer, otherRoom]) socket.clear();
+
+  registry.handlePacket(observer, packet('VOICE_COUNTS_REQUEST', {}));
+  assert.deepEqual(observer.packets('VOICE_COUNTS').at(-1)?.payload.counts, {
+    global: 0, cat: 0, mouse: 0
+  });
+
+  registry.handlePacket(globalMember, packet('VOICE_JOIN', { channel: 'global' }));
+  assert.equal(observer.packets('VOICE_COUNTS').at(-1)?.payload.counts.global, 1);
+  assert.equal(otherRoom.packets('VOICE_COUNTS').length, 0);
+  registry.handlePacket(catMember, packet('VOICE_JOIN', { channel: 'cat' }));
+  assert.deepEqual(observer.packets('VOICE_COUNTS').at(-1)?.payload.counts, {
+    global: 1, cat: 1, mouse: 0
+  });
+  registry.handlePacket(globalMember, packet('VOICE_LEAVE', {}));
+  assert.equal(observer.packets('VOICE_COUNTS').at(-1)?.payload.counts.global, 0);
+});
+
 test('routesVoiceSignalOnlyWithinSameRoomAndChannel', () => {
   const registry = new RoomRegistry();
   const sender = joined(registry, 'sender');

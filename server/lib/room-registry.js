@@ -68,6 +68,9 @@ export class RoomRegistry {
       case 'VOICE_SIGNAL':
         this.routeVoiceSignal(state, payload);
         return;
+      case 'VOICE_COUNTS_REQUEST':
+        if (state.room) this.send(state, 'VOICE_COUNTS', { counts: this.voiceCounts(state.room) });
+        return;
       default:
         if (GAME_PACKET_TYPES.has(packet.type) && state.room) {
           const forwarded = {
@@ -184,6 +187,7 @@ export class RoomRegistry {
       channel,
       member: state.player
     }, state.player.id), state.ws);
+    this.broadcastVoiceCounts(state.room);
   }
 
   leaveVoice(state) {
@@ -194,6 +198,7 @@ export class RoomRegistry {
       channel,
       playerId: state.player.id
     }, state.player.id), state.ws);
+    this.broadcastVoiceCounts(state.room);
   }
 
   routeVoiceSignal(state, payload) {
@@ -239,6 +244,14 @@ export class RoomRegistry {
 
   channelMembers(room, channel) {
     return [...room.members.values()].filter(state => state.voiceChannel === channel && state.ws.readyState === OPEN);
+  }
+
+  voiceCounts(room) {
+    return Object.fromEntries([...VOICE_CHANNELS].map(channel => [channel, this.channelMembers(room, channel).length]));
+  }
+
+  broadcastVoiceCounts(room) {
+    this.broadcast(room, this.packet('VOICE_COUNTS', { counts: this.voiceCounts(room) }));
   }
 
   packet(type, payload, senderId = 'server') {

@@ -72,6 +72,7 @@
 - `createIceConfig({ publicIp, sharedSecret, nowMs = Date.now(), ttlSeconds = 3600 })` returns `{ iceServers, expiresAt }`; credentials use Coturn's shared-secret HMAC-SHA1 format.
 - Incoming packets keep the existing `Protocol.encode()` envelope. New message types are `VOICE_JOIN`, `VOICE_LEAVE`, and `VOICE_SIGNAL`; server notifications are `VOICE_ROSTER`, `VOICE_PEER_JOINED`, `VOICE_PEER_LEFT`, and `VOICE_ERROR`.
 - `VOICE_SIGNAL.payload` is `{ targetId, channel, signal }`; forwarded payload adds server-derived `fromId` and can reach only an online target in the same game room and voice channel.
+- `VOICE_COUNTS_REQUEST` returns `{ counts: { global, cat, mouse } }` for the caller's game room; the relay broadcasts updated counts to that room after voice joins and leaves, without revealing member identities.
 
 - [ ] **Step 1: Create the ESM package/test harness** (`type: module`, `ws`, and `test` script) and write room-registry tests: `routesChatOnlyWithinJoinedRoom`, `usesJoinedIdentityForChat`, `forwardsExistingGameplayPacketsWithinRoom`, `rejectsWrongTeamForVoiceChannel`, `updatesRosterOnJoinAndLeave`, `routesVoiceSignalOnlyWithinSameRoomAndChannel`, and `enforcesVoiceLimitAndCleansDisconnectedMembers`. Add `relay.test.js` cases `healthEndpointReportsOk`, `iceConfigRequiresTurnSecret`, and `rejectsMalformedAndOversizedPackets`.
 - [ ] **Step 2: Run registry and relay tests and confirm they fail** with the missing modules/handlers.
@@ -134,6 +135,7 @@ Expected: existing tests pass; default/query URL handling, same-room delivery, r
 - Public methods: `join(channel) -> Promise<{ ok, error? }>`, `leave() -> Promise<void>`, `setMuted(muted) -> boolean`, `destroy() -> void`, `on(event, handler)`, and `off(event, handler)`.
 - Read-only snapshot: `{ state, channel, muted, members }`, where state is `IDLE`, `JOINING`, or `IN_CALL` and members are server-authorized `{ id, name, team }` records.
 - Events: `stateChange(snapshot)`, `membersChange(members)`, and `error({ message })`.
+- `refreshChannelCounts()` requests room-local aggregate counts; `countsChange(counts)` reports authoritative channel counts for UI cards.
 - Only `global`, `cat`, and `mouse` are accepted. Team mismatch, offline networking, and a server-reported full channel reject the join.
 
 - [ ] **Step 1: Write named tests**: `joinsAllowedChannelWithMicAndIceConfig`, `reportsMediaFailureWithoutJoining`, `rejectsTeamMismatch`, `muteTogglesLocalTracks`, `onlyLowerPlayerIdCreatesOffer`, `handlesIncomingOfferAnswerAndIce`, `peerLeftClosesConnection`, `leaveCancelsPendingJoinAndStopsTracks`, and `networkDisconnectStopsTracksAndRequiresManualRejoin`.
@@ -164,6 +166,7 @@ Expected: voice tests pass and existing network lifecycle behavior remains uncha
 **Interfaces:**
 - `game.js` owns a `VoiceManager` only while the network game view is active; end-game and `onHide` destroy it. On relay disconnect, the manager stops media and peers but stays alive to report the disconnected state and require a manual rejoin after networking recovers.
 - The voice panel renders three channel cards, member counts, join state, microphone mute state, error text, close, and leave controls.
+- Per-channel counts are room-scoped, include at most eight members, and update whenever a participant joins or leaves a voice channel.
 - Closing the panel keeps the connection; explicit leave or game lifecycle cleanup terminates it.
 
 - [ ] **Step 1: Add UI checklist cases** for offline disabled state, channel counts, join/switch/leave, mute, panel close while still joined, media permission denial, and cleanup on game end.

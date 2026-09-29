@@ -46,6 +46,7 @@ export class VoiceManager {
     this.peerConnections = new Map();
     this.remoteAudio = new Map();
     this.pendingCandidates = new Map();
+    this.channelCounts = { global: 0, cat: 0, mouse: 0 };
     this.listeners = new Map();
     this.joinGeneration = 0;
     this.joinWaiter = null;
@@ -58,7 +59,8 @@ export class VoiceManager {
       peerJoined: packet => this._onPeerJoined(packet),
       peerLeft: packet => this._onPeerLeft(packet),
       signal: packet => this._onSignal(packet),
-      error: packet => this._onServerError(packet)
+      error: packet => this._onServerError(packet),
+      counts: packet => this._onChannelCounts(packet)
     };
     networkManager.on('stateChange', this.networkHandlers.stateChange);
     networkManager.on(MSG_TYPES.VOICE_ROSTER, this.networkHandlers.roster);
@@ -66,6 +68,7 @@ export class VoiceManager {
     networkManager.on(MSG_TYPES.VOICE_PEER_LEFT, this.networkHandlers.peerLeft);
     networkManager.on(MSG_TYPES.VOICE_SIGNAL, this.networkHandlers.signal);
     networkManager.on(MSG_TYPES.VOICE_ERROR, this.networkHandlers.error);
+    networkManager.on(MSG_TYPES.VOICE_COUNTS, this.networkHandlers.counts);
   }
 
   get state() { return this._state; }
@@ -80,6 +83,11 @@ export class VoiceManager {
   }
 
   getSnapshot() { return this.snapshot; }
+
+  refreshChannelCounts() {
+    if (!this._isNetworkConnected()) return false;
+    return this.networkManager.send(MSG_TYPES.VOICE_COUNTS_REQUEST, {});
+  }
 
   on(event, handler) {
     if (typeof handler !== 'function') return;
@@ -198,6 +206,7 @@ export class VoiceManager {
     this.networkManager.off?.(MSG_TYPES.VOICE_PEER_LEFT, this.networkHandlers.peerLeft);
     this.networkManager.off?.(MSG_TYPES.VOICE_SIGNAL, this.networkHandlers.signal);
     this.networkManager.off?.(MSG_TYPES.VOICE_ERROR, this.networkHandlers.error);
+    this.networkManager.off?.(MSG_TYPES.VOICE_COUNTS, this.networkHandlers.counts);
   }
 
   _endSession({ sendLeave, error }) {
@@ -471,6 +480,16 @@ export class VoiceManager {
     const message = typeof packet.message === 'string' && packet.message ? packet.message : '语音操作失败，请重试';
     if (this._state === 'JOINING') this._failJoin(this.joinGeneration, message);
     else this._emitError(message);
+  }
+
+  _onChannelCounts(packet = {}) {
+    const counts = packet?.counts;
+    if (!counts || typeof counts !== 'object') return;
+    this.channelCounts = Object.fromEntries([...VOICE_CHANNELS].map(channel => {
+      const count = Number(counts[channel]);
+      return [channel, Number.isFinite(count) ? Math.max(0, Math.min(8, Math.floor(count))) : 0];
+    }));
+    this._emit('countsChange', { ...this.channelCounts });
   }
 }
 

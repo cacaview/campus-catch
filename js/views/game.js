@@ -1,5 +1,5 @@
 // js/views/game.js — 游戏视图（源 pages/game/game.js 1286 行移植）
-// Web 裁剪：删语音频道 8 方法 + 2 网络事件 + 8 数据字段；tool-voice 提示用文字聊天
+// Web 版恢复房间聊天与 WebRTC 语音；wx→platform：定位与地图走浏览器适配层
 // wx→platform：getLocation→geo，showModal/showActionSheet→ui（Promise 化），地图→MapLibre 封装
 import { navigate, DEFAULT_CENTER } from '../main.js';
 import { showToast, showModal, showActionSheet } from '../platform/ui.js';
@@ -8,6 +8,7 @@ import { createMap } from '../lib/map.js';
 import { networkManager } from '../utils/network/network-manager.js';
 import { roomSession } from '../utils/network/room-session.js';
 import { MSG_TYPES } from '../utils/network/protocol.js';
+import VoiceManager from '../utils/voice-manager.js';
 import SkillSystem from '../utils/skill-system.js';
 import { MapItemsManager, ITEM_TYPES } from '../utils/map-items.js';
 import soundVibration from '../utils/sound-vibration.js';
@@ -111,6 +112,46 @@ const GAME_HTML = `
       <div class="rank-modal-tip" id="game-rank-tip" hidden>🔍 扫描暴露中，金色标记为暴露的敌人</div>
       <button class="m-btn confirm rank-close" id="game-rank-close">关闭</button>
     </div>
+  </div>
+
+  <!-- 语音频道面板 -->
+  <div class="voice-panel" id="game-voice-panel" hidden>
+    <section class="voice-dialog" role="dialog" aria-modal="true" aria-labelledby="game-voice-title">
+      <header class="voice-header">
+        <div>
+          <h2 id="game-voice-title">🎙️ 语音频道</h2>
+          <p id="game-voice-status" class="voice-status"></p>
+        </div>
+        <button id="game-voice-close" class="voice-close" aria-label="关闭语音面板">×</button>
+      </header>
+      <p id="game-voice-disabled" class="voice-disabled" hidden></p>
+      <div class="voice-channel-list">
+        <button class="voice-channel" data-voice-channel="global">
+          <span class="voice-channel-title">🌐 全体频道</span>
+          <span class="voice-channel-count" data-voice-count="global">—/8</span>
+          <span class="voice-channel-action" data-voice-action="global">加入</span>
+        </button>
+        <button class="voice-channel" data-voice-channel="cat">
+          <span class="voice-channel-title">🐱 猫队频道</span>
+          <span class="voice-channel-count" data-voice-count="cat">—/8</span>
+          <span class="voice-channel-action" data-voice-action="cat">加入</span>
+        </button>
+        <button class="voice-channel" data-voice-channel="mouse">
+          <span class="voice-channel-title">🐭 鼠队频道</span>
+          <span class="voice-channel-count" data-voice-count="mouse">—/8</span>
+          <span class="voice-channel-action" data-voice-action="mouse">加入</span>
+        </button>
+      </div>
+      <section class="voice-members-section" aria-live="polite">
+        <h3 id="game-voice-members-title">当前频道成员</h3>
+        <ul id="game-voice-members" class="voice-members"></ul>
+      </section>
+      <p id="game-voice-error" class="voice-error" role="alert" hidden></p>
+      <footer class="voice-controls">
+        <button id="game-voice-mute" class="voice-control" disabled>🎙️ 静音</button>
+        <button id="game-voice-leave" class="voice-control danger" disabled>退出频道</button>
+      </footer>
+    </section>
   </div>`;
 
 export function create(rootEl, globalStateRef) {
@@ -185,6 +226,13 @@ export function create(rootEl, globalStateRef) {
 
   // 网络监听引用（off 需按引用解绑，与源 setup/removeNetworkListeners 一致）
   let netHandlers = {};
+  let voiceManager = null;
+  let voiceSnapshot = { state: 'IDLE', channel: null, muted: false, members: [] };
+  let voiceCounts = { global: 0, cat: 0, mouse: 0 };
+  let hasVoiceCounts = false;
+  let voicePanelOpen = false;
+  let voiceError = '';
+  let voiceHandlers = null;
 
   const later = (fn, ms) => {
     const id = setTimeout(fn, ms);
@@ -210,6 +258,155 @@ export function create(rootEl, globalStateRef) {
   const renderNetStatus = (text, cls) => {
     $('game-net-text').textContent = text;
     $('game-net-dot').className = 'net-status-dot ' + cls;
+  };
+
+  const voiceChannelNames = { global: '全体频道', cat: '猫队频道', mouse: '鼠队频道' };
+
+  const renderVoicePanel = () => {
+    const panel = $('game-voice-panel');
+    if (!panel) return;
+    panel.hidden = !voicePanelOpen;
+
+    const offline = s.netMode === 'OFFLINE';
+    const connected = networkManager.state === 'CONNECTED';
+    const ended = s.gamePhase === 'END';
+    const channelReady = Boolean(voiceManager && !offline && connected && !ended);
+    const disabledNote = $('game-voice-disabled');
+    if (offline) {
+      disabledNote.textContent = '单机模式不能使用实时语音，请先加入联机房间。';
+      disabledNote.hidden = false;
+    } else if (ended) {
+      disabledNote.textContent = '本局已结束，语音频道已关闭。';
+      disabledNote.hidden = false;
+    } else if (!connected) {
+      disabledNote.textContent = '联机连接恢复后，可以手动重新加入语音。';
+      disabledNote.hidden = false;
+    } else {
+      disabledNote.hidden = true;
+    }
+
+    const currentLabel = voiceChannelNames[voiceSnapshot.channel];
+    const status = $('game-voice-status');
+    if (ended) status.textContent = '本局已结束';
+    else if (voiceSnapshot.state === 'JOINING') status.textContent = `正在加入${currentLabel || '语音频道'}…`;
+    else if (voiceSnapshot.state === 'IN_CALL') status.textContent = `已加入${currentLabel} · ${voiceSnapshot.muted ? '麦克风已静音' : '麦克风已开启'}`;
+    else if (offline) status.textContent = '当前为单机模式';
+    else if (!connected) status.textContent = '网络断开，语音已停止';
+    else status.textContent = '选择频道加入语音';
+
+    rootEl.querySelectorAll('[data-voice-channel]').forEach(button => {
+      const channel = button.dataset.voiceChannel;
+      const teamAllowed = channel === 'global' || channel === s.myTeam;
+      const active = voiceSnapshot.state === 'IN_CALL' && voiceSnapshot.channel === channel;
+      const joining = voiceSnapshot.state === 'JOINING';
+      const full = hasVoiceCounts && (voiceCounts[channel] || 0) >= 8 && !active;
+      button.disabled = !channelReady || !teamAllowed || joining || active || full;
+      button.classList.toggle('active', active);
+      const action = button.querySelector('[data-voice-action]');
+      if (action) action.textContent = active ? '已加入' : joining && voiceSnapshot.channel === channel ? '连接中…' : full ? '已满' : voiceSnapshot.state === 'IN_CALL' ? '切换' : '加入';
+      const count = button.querySelector('[data-voice-count]');
+      if (count) count.textContent = `${hasVoiceCounts ? (voiceCounts[channel] || 0) : '—'}/8`;
+    });
+
+    $('game-voice-members-title').textContent = currentLabel ? `${currentLabel}成员（${voiceSnapshot.members.length}）` : '当前频道成员';
+    const members = $('game-voice-members');
+    members.replaceChildren();
+    voiceSnapshot.members.forEach(member => {
+      const item = document.createElement('li');
+      const team = document.createElement('span');
+      team.className = 'voice-member-team';
+      team.textContent = member.team === 'cat' ? '🐱' : member.team === 'mouse' ? '🐭' : '🎙️';
+      const name = document.createElement('span');
+      name.className = 'voice-member-name';
+      name.textContent = member.name;
+      if (voiceManager && member.id === voiceManager.player.id) {
+        const self = document.createElement('span');
+        self.className = 'voice-member-self';
+        self.textContent = '我';
+        item.append(team, name, self);
+      } else {
+        item.append(team, name);
+      }
+      members.appendChild(item);
+    });
+
+    const error = $('game-voice-error');
+    error.textContent = voiceError;
+    error.hidden = !voiceError;
+    $('game-voice-mute').disabled = voiceSnapshot.state !== 'IN_CALL';
+    $('game-voice-mute').textContent = voiceSnapshot.muted ? '🔊 取消静音' : '🎙️ 静音';
+    $('game-voice-leave').disabled = !['JOINING', 'IN_CALL'].includes(voiceSnapshot.state);
+  };
+
+  const destroyVoiceManager = () => {
+    if (voiceManager && voiceHandlers) {
+      voiceManager.off('stateChange', voiceHandlers.stateChange);
+      voiceManager.off('membersChange', voiceHandlers.membersChange);
+      voiceManager.off('countsChange', voiceHandlers.countsChange);
+      voiceManager.off('error', voiceHandlers.error);
+      voiceManager.destroy();
+    }
+    voiceManager = null;
+    voiceHandlers = null;
+    voiceSnapshot = { state: 'IDLE', channel: null, muted: false, members: [] };
+    voiceCounts = { global: 0, cat: 0, mouse: 0 };
+    hasVoiceCounts = false;
+    voiceError = '';
+    renderVoicePanel();
+  };
+
+  const setupVoiceManager = () => {
+    destroyVoiceManager();
+    if (s.netMode !== 'OFFLINE') {
+      const player = roomSession.myPlayer || globalStateRef.currentPlayer;
+      if (player && player.id) {
+        voiceManager = new VoiceManager({ networkManager, player });
+        voiceSnapshot = voiceManager.snapshot;
+        voiceCounts = { ...voiceManager.channelCounts };
+        voiceHandlers = {
+          stateChange: snapshot => {
+            voiceSnapshot = snapshot;
+            if (snapshot.state === 'IN_CALL') voiceError = '';
+            renderVoicePanel();
+          },
+          membersChange: members => {
+            voiceSnapshot = { ...voiceSnapshot, members };
+            renderVoicePanel();
+          },
+          countsChange: counts => {
+            voiceCounts = counts;
+            hasVoiceCounts = true;
+            renderVoicePanel();
+          },
+          error: ({ message } = {}) => {
+            voiceError = message || '语音连接失败，请重试';
+            renderVoicePanel();
+          }
+        };
+        voiceManager.on('stateChange', voiceHandlers.stateChange);
+        voiceManager.on('membersChange', voiceHandlers.membersChange);
+        voiceManager.on('countsChange', voiceHandlers.countsChange);
+        voiceManager.on('error', voiceHandlers.error);
+        voiceManager.refreshChannelCounts();
+      }
+    }
+    renderVoicePanel();
+  };
+
+  const openVoicePanel = () => {
+    voicePanelOpen = true;
+    voiceError = '';
+    voiceManager?.refreshChannelCounts();
+    renderVoicePanel();
+  };
+
+  const joinVoiceChannel = async channel => {
+    if (!voiceManager) return;
+    voiceError = '';
+    renderVoicePanel();
+    const result = await voiceManager.join(channel);
+    if (!result.ok && result.error !== '语音加入已取消') voiceError = result.error || '无法加入语音频道';
+    renderVoicePanel();
   };
 
   const renderBoundary = () => { $('game-boundary').hidden = !s.isOutsideArea; };
@@ -399,6 +596,8 @@ export function create(rootEl, globalStateRef) {
         dotClass = 'dot-disconnected';
       }
       renderNetStatus(statusText, dotClass);
+      if (state === 'CONNECTED') voiceManager?.refreshChannelCounts();
+      renderVoicePanel();
     };
 
     netHandlers.playerMove = payload => {
@@ -1116,6 +1315,8 @@ export function create(rootEl, globalStateRef) {
     clearAllTimers();
     soundVibration.playSound('catch_success');
     s.gamePhase = 'END';
+    voicePanelOpen = false;
+    destroyVoiceManager();
     s.isPaused = false;
     renderPhase();
     addSystemMessage('活动结束！');
@@ -1166,8 +1367,33 @@ export function create(rootEl, globalStateRef) {
   $('tool-rank').addEventListener('click', onShowRank);
   $('tool-radar').addEventListener('click', onRadar);
   $('tool-track').addEventListener('click', onTrack);
-  $('tool-voice').addEventListener('click', () => {
-    showToast({ title: 'Web 版暂不支持语音，请使用文字聊天', icon: 'none' });
+  $('tool-voice').addEventListener('click', openVoicePanel);
+  $('game-voice-close').addEventListener('click', () => {
+    voicePanelOpen = false;
+    renderVoicePanel();
+  });
+  $('game-voice-panel').addEventListener('click', event => {
+    if (event.target === $('game-voice-panel')) {
+      voicePanelOpen = false;
+      renderVoicePanel();
+    }
+  });
+  $('game-voice-panel').querySelector('.voice-channel-list').addEventListener('click', event => {
+    const button = event.target.closest('[data-voice-channel]');
+    if (button && !button.disabled) void joinVoiceChannel(button.dataset.voiceChannel);
+  });
+  $('game-voice-mute').addEventListener('click', () => {
+    if (!voiceManager) return;
+    const muted = voiceManager.setMuted(!voiceSnapshot.muted);
+    if (!muted) voiceError = '加入语音频道后才能控制麦克风';
+    else voiceError = '';
+    renderVoicePanel();
+  });
+  $('game-voice-leave').addEventListener('click', async () => {
+    if (!voiceManager) return;
+    await voiceManager.leave();
+    voiceError = '';
+    renderVoicePanel();
   });
   $('game-host-btn').addEventListener('click', onHostMenu);
   $('game-backpack-btn').addEventListener('click', toggleBackpack);
@@ -1310,6 +1536,7 @@ export function create(rootEl, globalStateRef) {
     );
 
     setupNetworkListeners();
+    setupVoiceManager();
     if (netMode === 'OFFLINE') {
       // 仅单机生成 AI 假人；联机只同步真实玩家
       initMockAIPlayers();
@@ -1330,6 +1557,8 @@ export function create(rootEl, globalStateRef) {
   const onHide = () => {
     clearAllTimers();
     removeNetworkListeners();
+    voicePanelOpen = false;
+    destroyVoiceManager();
     stopLocationUpdate();
     networkManager.disconnect();
     if (map) {

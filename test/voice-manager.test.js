@@ -111,6 +111,45 @@ test('joinsAllowedChannelWithMicAndIceConfig', async () => {
   assert.equal(h.manager.snapshot.channel, 'global');
 });
 
+test('requestsAndPublishesVoiceChannelCounts', () => {
+  const h = harness();
+  const changes = [];
+  h.manager.on('countsChange', counts => changes.push(counts));
+  assert.equal(h.manager.refreshChannelCounts(), true);
+  assert.equal(h.networkManager.sent.at(-1).type, MSG_TYPES.VOICE_COUNTS_REQUEST);
+
+  h.networkManager.emit(MSG_TYPES.VOICE_COUNTS, {
+    counts: { global: 4, cat: 2, mouse: 1, unknown: 90 }
+  });
+  assert.deepEqual(h.manager.channelCounts, { global: 4, cat: 2, mouse: 1 });
+  assert.deepEqual(changes.at(-1), { global: 4, cat: 2, mouse: 1 });
+  h.manager.destroy();
+});
+
+test('switchesVoiceChannelsByLeavingTheCurrentChannel', async () => {
+  const streams = [];
+  const h = harness({
+    currentPlayer: player('mouse-player', 'mouse'),
+    getUserMedia: async () => {
+      const stream = new FakeStream();
+      streams.push(stream);
+      return stream;
+    }
+  });
+  await enterVoice(h, 'global');
+
+  const switching = h.manager.join('mouse');
+  await tick();
+  assert.equal(h.networkManager.sent.some(message => message.type === MSG_TYPES.VOICE_LEAVE && message.payload.channel === 'global'), true);
+  assert.equal(h.networkManager.sent.some(message => message.type === MSG_TYPES.VOICE_JOIN && message.payload.channel === 'mouse'), true);
+  h.networkManager.emit(MSG_TYPES.VOICE_ROSTER, { channel: 'mouse', members: [h.manager.player] });
+  assert.deepEqual(await switching, { ok: true });
+  assert.equal(streams[0].getTracks()[0].stopCount, 1);
+  assert.equal(streams[1].getTracks()[0].stopCount, 0);
+  assert.equal(h.manager.snapshot.channel, 'mouse');
+  await h.manager.leave();
+});
+
 test('reportsMediaFailureWithoutJoining', async () => {
   const h = harness({ getUserMedia: async () => { throw new Error('Permission denied'); } });
   const result = await h.manager.join('global');
