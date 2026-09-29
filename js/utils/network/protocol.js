@@ -20,6 +20,15 @@ export const MSG_TYPES = {
   CATCH_EVENT: 'CATCH_EVENT',     // 抓捕判定事件
   CHAT_MESSAGE: 'CHAT_MESSAGE',   // 聊天消息
 
+  // WebRTC 语音信令（媒体只在浏览器间传输）
+  VOICE_JOIN: 'VOICE_JOIN',
+  VOICE_LEAVE: 'VOICE_LEAVE',
+  VOICE_SIGNAL: 'VOICE_SIGNAL',
+  VOICE_ROSTER: 'VOICE_ROSTER',
+  VOICE_PEER_JOINED: 'VOICE_PEER_JOINED',
+  VOICE_PEER_LEFT: 'VOICE_PEER_LEFT',
+  VOICE_ERROR: 'VOICE_ERROR',
+
   // 房主控制 (Host -> 全员)
   GAME_PAUSE: 'GAME_PAUSE',       // 暂停/继续 { paused }
   GAME_EXTEND: 'GAME_EXTEND',     // 延长局时 { seconds }
