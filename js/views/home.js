@@ -228,6 +228,7 @@ export function create(rootEl, globalStateRef) {
   let guideStep = 0;
   let showRules = false;
   let joinEventsBound = false;
+  let joinFlowPending = false;
   let joinWatchdog = null;
   let areaCenter = { ...DEFAULT_CENTER };
 
@@ -274,7 +275,7 @@ export function create(rootEl, globalStateRef) {
     $('home-start').classList.toggle('ready', ready);
     $('home-start').textContent = netMode === 'OFFLINE'
       ? '开始活动 (单机)'
-      : (createdRoomPasscode ? '开始活动 (房主)' : '开始匹配联机');
+      : (createdRoomPasscode ? '打开等待大厅 (房主)' : '加入服务器房间');
   };
   const renderArea = () => {
     areaPoints = GameArea.orderBoundaryPoints(rawPoints);
@@ -468,7 +469,10 @@ export function create(rootEl, globalStateRef) {
   const startJoinWatchdog = (actionText) => {
     clearJoinWatchdog();
     joinWatchdog = setTimeout(() => {
+      joinFlowPending = false;
       hideLoading();
+      networkManager.disconnect();
+      resetRoomAttempt();
       showModal({
         title: `${actionText}没有响应`,
         content: '可能的原因：\n1. 服务器地址（wss://）填错\n2. relay-server 未运行\n3. 跨网络无法直连（需要公网可访问的地址）',
@@ -483,23 +487,38 @@ export function create(rootEl, globalStateRef) {
     }
   };
 
+  const resetRoomAttempt = () => {
+    roomSession.reset();
+    createdRoomPasscode = '';
+    $('home-join-link-box').hidden = true;
+    renderChecklist();
+  };
+
   // 加入/建房结果事件只订阅一次
   const ensureJoinEventsBound = () => {
     if (joinEventsBound) return;
     joinEventsBound = true;
 
     networkManager.on('joinSuccess', () => {
+      if (!joinFlowPending) return;
+      joinFlowPending = false;
       clearJoinWatchdog();
       hideLoading();
       globalStateRef.gameArea = roomSession.gameArea;
       globalStateRef.gameDurationSeconds = roomSession.gameDurationSeconds;
-      showToast({ title: '房间就绪，即将进入活动！', icon: 'success' });
-      setTimeout(() => navigate('game'), 600);
+      showToast({
+        title: roomSession.isHost ? '房间已创建，等待队员加入' : '已加入房间，等待房主开始',
+        icon: 'success'
+      });
+      setTimeout(() => navigate('lobby'), 600);
     });
 
     networkManager.on('joinFail', (reason) => {
+      if (!joinFlowPending) return;
+      joinFlowPending = false;
       clearJoinWatchdog();
       hideLoading();
+      resetRoomAttempt();
       showToast({ title: reason || '加入失败，请检查服务器地址和身份码', icon: 'none' });
     });
   };
@@ -537,14 +556,16 @@ export function create(rootEl, globalStateRef) {
     renderChecklist();
 
     ensureJoinEventsBound();
+    joinFlowPending = true;
     showLoading({ title: '正在创建房间...' });
     startJoinWatchdog('创建房间');
-    networkManager.connectServer(serverUrl, playerInfo, passcode, gameArea, gameDurationSeconds).catch(err => {
+    networkManager.connectServer(serverUrl, playerInfo, passcode, gameArea, gameDurationSeconds, {
+      createIfMissingRoom: true
+    }).catch(err => {
       hideLoading();
+      joinFlowPending = false;
       clearJoinWatchdog();
-      createdRoomPasscode = '';
-      $('home-join-link-box').hidden = true;
-      renderChecklist();
+      resetRoomAttempt();
       showModal({
         title: '创建房间失败',
         content: (err && err.message ? err.message + '\n' : '') + '请检查：服务器地址是否正确、relay-server 是否已启动、浏览器是否允许该地址连接。',
@@ -605,12 +626,13 @@ export function create(rootEl, globalStateRef) {
         // 房主复用已建房间：连接还活着就直接开局；
         // 已断开（如上一局结束 onHide 断连）则先重连房间再进局
         if (networkManager.state === 'CONNECTED') {
-          navigate('game');
+          navigate('lobby');
           return;
         }
         showLoading({ title: '正在连接服务器...' });
         startJoinWatchdog('连接服务器');
         ensureJoinEventsBound();
+        joinFlowPending = true;
         roomSession.isHost = true;
         roomSession.myPlayer = globalStateRef.currentPlayer;
         roomSession.passcode = createdRoomPasscode;
@@ -630,7 +652,9 @@ export function create(rootEl, globalStateRef) {
           })
           .catch(() => {
             hideLoading();
+            joinFlowPending = false;
             clearJoinWatchdog();
+            resetRoomAttempt();
             showToast({ title: '无法连接服务器，已降级为单机试玩', icon: 'none' });
             globalStateRef.netMode = 'OFFLINE';
             setTimeout(() => navigate('game'), 1000);
@@ -641,6 +665,7 @@ export function create(rootEl, globalStateRef) {
       showLoading({ title: '正在连接服务器...' });
       startJoinWatchdog('连接服务器');
       ensureJoinEventsBound();
+      joinFlowPending = true;
       roomSession.isHost = false;
       roomSession.myPlayer = globalStateRef.currentPlayer;
       roomSession.passcode = joinPasscode || '8888';
@@ -661,7 +686,9 @@ export function create(rootEl, globalStateRef) {
         })
         .catch(() => {
           hideLoading();
+          joinFlowPending = false;
           clearJoinWatchdog();
+          resetRoomAttempt();
           showToast({ title: '无法连接服务器，已降级为单机试玩', icon: 'none' });
           globalStateRef.netMode = 'OFFLINE';
           setTimeout(() => navigate('game'), 1000);
@@ -671,6 +698,13 @@ export function create(rootEl, globalStateRef) {
 
   /* ---------- 生命周期 ---------- */
   const onShow = () => {
+    if (globalStateRef.clearRoomSessionOnHome) {
+      globalStateRef.clearRoomSessionOnHome = false;
+      netMode = 'OFFLINE';
+      createdRoomPasscode = '';
+      joinPasscode = '';
+      $('home-join-link-box').hidden = true;
+    }
     nickname = getStorage('lastNickname') || '';
     $('home-nickname').value = nickname;
     restoreConfig();

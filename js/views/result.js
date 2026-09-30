@@ -8,6 +8,8 @@ import { getStorage, setStorage } from '../platform/storage.js';
 import { createMap } from '../lib/map.js';
 import GameArea from '../utils/game-area.js';
 import { getStablePlayerId } from '../utils/player-identity.js';
+import { networkManager } from '../utils/network/network-manager.js';
+import { roomSession } from '../utils/network/room-session.js';
 
 const RESULT_HTML = `
   <!-- 无结算数据空态：引导回首页开局，不展示任何 mock 战报 -->
@@ -370,7 +372,25 @@ export function create(rootEl, globalStateRef) {
   };
 
   // 再来一局（源 playAgain L325-333 原样：沿用配置直接重开）
+  const leaveCompletedOnlineRoom = () => {
+    if (globalStateRef.netMode !== 'SERVER' || !roomSession.roomId) return;
+    networkManager.disconnect();
+    roomSession.reset();
+    globalStateRef.netMode = 'OFFLINE';
+    globalStateRef.gameReady = false;
+    globalStateRef.clearRoomSessionOnHome = true;
+    if (typeof window !== 'undefined') {
+      const inviteUrl = new URL(window.location.href);
+      if (inviteUrl.searchParams.has('server') || inviteUrl.searchParams.has('passcode')) {
+        inviteUrl.searchParams.delete('server');
+        inviteUrl.searchParams.delete('passcode');
+        window.history.replaceState(window.history.state, '', inviteUrl);
+      }
+    }
+  };
+
   const playAgain = () => {
+    leaveCompletedOnlineRoom();
     const cfg = getStorage('indexCfg') || {};
     const lastPlayer = globalStateRef.currentPlayer;
     const team = cfg.selectedTeam || (lastPlayer && lastPlayer.team) || 'mouse';
@@ -394,6 +414,11 @@ export function create(rootEl, globalStateRef) {
     navigate('game');
   };
 
+  const returnHome = () => {
+    leaveCompletedOnlineRoom();
+    navigate('home');
+  };
+
   /* ---------- 生命周期 ---------- */
 
   const onShow = () => {
@@ -404,6 +429,8 @@ export function create(rootEl, globalStateRef) {
       renderEmpty();
       return;
     }
+    // 进入有效结算页就结束本地联机房间生命周期，避免从排行等其他出口返回时重开旧局。
+    leaveCompletedOnlineRoom();
     s.noResult = false;
     renderEmpty();
 
@@ -469,7 +496,7 @@ export function create(rootEl, globalStateRef) {
   $('result-share').addEventListener('click', shareChallenge);
   $('result-save-card').addEventListener('click', saveShareCard);
   $('result-rank').addEventListener('click', () => navigate('rank'));
-  $('result-home').addEventListener('click', () => navigate('home'));
+  $('result-home').addEventListener('click', returnHome);
   $('result-replay-toggle').addEventListener('click', onReplayToggle);
   $('result-replay-restart').addEventListener('click', onReplayRestart);
 

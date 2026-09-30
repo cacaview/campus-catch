@@ -94,3 +94,127 @@ test('regression: game.onShow 按真实网络状态渲染联机状态灯', () =>
   assert.match(onShow[0], /networkManager\.state/);
   assert.doesNotMatch(onShow[0], /renderNetStatus\('服务器联机 🟢', 'dot-online'\);\s*\}/);
 });
+
+test('regression: online join success enters the waiting lobby instead of starting gameplay', () => {
+  const home = read('js/views/home.js');
+  const start = home.indexOf("networkManager.on('joinSuccess'");
+  const end = home.indexOf("networkManager.on('joinFail'", start);
+  assert.ok(start >= 0 && end > start, '未找到 joinSuccess 处理器');
+  const handler = home.slice(start, end);
+  assert.match(handler, /navigate\('lobby'\)/);
+  assert.doesNotMatch(handler, /navigate\('game'\)/);
+});
+
+test('regression: direct online game route is gated until the room is started', () => {
+  const game = read('js/views/game.js');
+  assert.match(game, /globalStateRef\.netMode === 'SERVER'\s*&&\s*roomSession\.phase !== 'STARTED'[\s\S]{0,100}navigate\('lobby'\)/);
+  assert.match(game, /startCountdown\(netMode === 'SERVER'\s*\?\s*roomSession\.startAt\s*:\s*null\)/);
+});
+
+test('regression: redirecting a waiting room away from game preserves its socket', () => {
+  const game = read('js/views/game.js');
+  const onHide = game.match(/const onHide = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(onHide, '未找到 game.onHide');
+  assert.match(onHide[1], /blockedEntry/);
+  assert.match(onHide[1], /return;/);
+});
+
+test('regression: server gameplay begins at the relay deadline while location resolves independently', () => {
+  const game = read('js/views/game.js');
+  const startGame = game.match(/const startGame = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(startGame, '未找到 startGame 函数');
+  assert.match(startGame[1], /s\.netMode === 'SERVER'[\s\S]*?beginPlaying\(\);[\s\S]*?getLocation\(/);
+  assert.match(startGame[1], /clearInterval\(simMovementTimer\)/);
+
+  const effects = [];
+  const runStartGame = new Function(
+    's', 'GameArea', 'gameArea', 'hasRealLocation', 'beginPlaying', 'getLocation',
+    'simMovementTimer', 'clearInterval', 'applyLocation', 'startLocationWatch', 'showToast',
+    `'use strict';\n${startGame[1]}`
+  );
+  assert.doesNotThrow(() => runStartGame(
+    { netMode: 'SERVER' },
+    { isValidArea: () => true },
+    { type: 'polygon', points: [] },
+    false,
+    () => effects.push('begin'),
+    handlers => { effects.push('request-location'); handlers.success({ latitude: 1, longitude: 2 }); },
+    7,
+    () => effects.push('clear-simulation'),
+    () => effects.push('apply-location'),
+    () => effects.push('watch-location'),
+    () => effects.push('toast')
+  ));
+  assert.deepEqual(effects, ['begin', 'request-location', 'clear-simulation', 'apply-location', 'watch-location']);
+});
+
+test('regression: lobby has separate online roster and offline AI controls', () => {
+  const lobby = read('js/views/lobby.js');
+  assert.match(lobby, /globalStateRef\.netMode === 'SERVER'/);
+  assert.match(lobby, /networkManager\.on\(MSG_TYPES\.PLAYER_JOINED/);
+  assert.match(lobby, /lobby-ai-stepper/);
+  assert.match(lobby, /lobby-copy-link/);
+});
+
+test('regression: server lobby without a room returns to home with an explanation', () => {
+  const lobby = read('js/views/lobby.js');
+  const onShow = lobby.match(/const onShow = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(onShow, '未找到 lobby.onShow');
+  assert.match(onShow[1], /globalStateRef\.netMode === 'SERVER'[\s\S]*?roomSession\.roomId[\s\S]*?navigate\('home'\)/);
+});
+
+test('regression: failed server room creation clears provisional room identity', () => {
+  const home = read('js/views/home.js');
+  const createRoom = home.match(/const createServerRoom = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(createRoom, '未找到 createServerRoom');
+  assert.match(createRoom[1], /\.catch\(err => \{[\s\S]*?resetRoomAttempt\(\)/);
+  assert.match(createRoom[1], /createIfMissingRoom:\s*true/);
+  assert.match(home, /const resetRoomAttempt = \(\) => \{[\s\S]*?roomSession\.reset\(\)/);
+});
+
+test('regression: returning home after an online match clears the completed room session', () => {
+  const result = read('js/views/result.js');
+  const home = read('js/views/home.js');
+  assert.match(result, /import \{ networkManager \} from '..\/utils\/network\/network-manager\.js'/);
+  assert.match(result, /import \{ roomSession \} from '..\/utils\/network\/room-session\.js'/);
+  const cleanup = result.match(/const leaveCompletedOnlineRoom = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(cleanup, '结算页缺少已结束联机房间清理');
+  const handler = result.match(/const returnHome = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(handler, '结算页缺少统一的回首页处理');
+  const onShow = result.match(/const onShow = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(onShow, '未找到 result.onShow');
+  assert.match(onShow[1], /if \(!gameResult[\s\S]*?return;[\s\S]*?leaveCompletedOnlineRoom\(\)/);
+  assert.match(result, /result-rank'\)\.addEventListener\('click',[\s\S]*?navigate\('rank'\)/);
+
+  const effects = [];
+  const globalStateRef = { netMode: 'SERVER', gameReady: true };
+  const roomSession = { roomId: 'room-1', reset: () => effects.push('reset-room') };
+  const networkManager = { disconnect: () => effects.push('disconnect') };
+  const navigate = route => effects.push(`navigate:${route}`);
+  let replacedUrl = '';
+  const browserWindow = {
+    location: { href: 'https://game.example/?server=wss%3A%2F%2Frelay.example%2Fws&passcode=1234#home' },
+    history: {
+      state: null,
+      replaceState: (_state, _title, url) => { replacedUrl = String(url); }
+    }
+  };
+  const returnHome = new Function(
+    'globalStateRef', 'roomSession', 'networkManager', 'navigate', 'window',
+    `'use strict';\nconst leaveCompletedOnlineRoom = () => {${cleanup[1]}\n};\n` +
+      `const returnHome = () => {${handler[1]}\n};\nreturn returnHome;`
+  )(globalStateRef, roomSession, networkManager, navigate, browserWindow);
+  returnHome();
+  assert.deepEqual(effects, ['disconnect', 'reset-room', 'navigate:home']);
+  assert.equal(globalStateRef.netMode, 'OFFLINE');
+  assert.equal(globalStateRef.gameReady, false);
+  assert.equal(globalStateRef.clearRoomSessionOnHome, true);
+  assert.ok(replacedUrl, '已使用完的邀请地址应从浏览器地址栏移除');
+  const sanitizedUrl = new URL(replacedUrl, 'https://game.example');
+  assert.equal(sanitizedUrl.searchParams.has('server'), false);
+  assert.equal(sanitizedUrl.searchParams.has('passcode'), false);
+
+  const homeOnShow = home.match(/const onShow = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(homeOnShow, '未找到 home.onShow');
+  assert.match(homeOnShow[1], /clearRoomSessionOnHome[\s\S]*?netMode = 'OFFLINE'[\s\S]*?createdRoomPasscode = ''[\s\S]*?joinPasscode = ''/);
+});

@@ -1,4 +1,4 @@
-/* css/lobby.css — 大厅样式（源 pages/lobby/lobby.wxss 移植，rpx→px÷2，scoped 到 #view-lobby；Web 单机专用，去掉房间码/二维码） */
+/* css/lobby.css — 单机与服务器等待大厅样式 */
 #view-lobby {
   background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
 }
@@ -45,6 +45,30 @@
   gap: 4px;
   color: #9aa0c3;
   font-size: 12.5px;
+}
+
+#view-lobby .online-invite {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 14px;
+}
+#view-lobby .invite-label { color: #cfd3f5; font-size: 12px; }
+#view-lobby .invite-link {
+  overflow-wrap: anywhere;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: #e8eaf8;
+  font-size: 12px;
+  line-height: 1.45;
+  user-select: text;
+}
+#view-lobby .online-status {
+  margin-top: 10px;
+  color: #7be0a2;
+  font-size: 12px;
 }
 
 #view-lobby .card-title {
@@ -123,6 +147,7 @@
   cursor: pointer;
 }
 #view-lobby .btn:active { filter: brightness(0.95); }
+#view-lobby .btn:disabled { opacity: 0.55; cursor: default; }
 
 #view-lobby .btn-primary {
   background: linear-gradient(90deg, #ffd700, #ff9a44);

@@ -202,6 +202,7 @@ export function create(rootEl, globalStateRef) {
   let aiPlayers = [];
   let gameArea = null;
   let countdownTimer = null;
+  let blockedEntry = false;
   let gameTimer = null;
   let gameTickTimer = null;
   let simMovementTimer = null;
@@ -704,26 +705,42 @@ export function create(rootEl, globalStateRef) {
 
   /* ---------- 游戏流程 ---------- */
 
-  const startCountdown = () => {
+  const startCountdown = (startAt = null) => {
+    const deadline = Number.isFinite(startAt) ? startAt : Date.now() + 3000;
     s.gamePhase = 'COUNTDOWN';
-    s.countdown = 3;
+    s.countdown = Math.max(1, Math.ceil((deadline - Date.now()) / 1000));
     renderPhase();
     soundVibration.playSound('countdown');
-    countdownTimer = setInterval(() => {
-      const current = s.countdown - 1;
-      if (current <= 0) {
+    const updateCountdown = () => {
+      const current = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      if (current === 0) {
         clearInterval(countdownTimer);
         countdownTimer = null;
         startGame();
-      } else {
+      } else if (s.countdown !== current) {
         s.countdown = current;
         renderPhase();
       }
-    }, 1000);
+    };
+    countdownTimer = setInterval(updateCountdown, 100);
   };
 
   // 源 startGame L563-599；Web：定位失败不再卡死，进入模拟移动模式
   const startGame = () => {
+    if (s.netMode === 'SERVER' && GameArea.isValidArea(gameArea) && !hasRealLocation) {
+      beginPlaying();
+      getLocation({
+        success: loc => {
+          hasRealLocation = true;
+          if (simMovementTimer) clearInterval(simMovementTimer);
+          simMovementTimer = null;
+          applyLocation(loc);
+          startLocationWatch();
+        },
+        fail: () => showToast({ title: '未获取定位，进入模拟移动模式', icon: 'none' })
+      });
+      return;
+    }
     if (GameArea.isValidArea(gameArea) && !hasRealLocation) {
       getLocation({
         success: loc => {
@@ -1419,6 +1436,12 @@ export function create(rootEl, globalStateRef) {
 
   // 源 onLoad L85-151
   const onShow = () => {
+    if (globalStateRef.netMode === 'SERVER' && roomSession.phase !== 'STARTED') {
+      blockedEntry = true;
+      navigate('lobby');
+      return;
+    }
+    blockedEntry = false;
     // tabBar 裸进守卫
     if (!globalStateRef.currentPlayer) {
       showModal({
@@ -1550,11 +1573,15 @@ export function create(rootEl, globalStateRef) {
     }
     renderMarkers();
 
-    startCountdown();
+    startCountdown(netMode === 'SERVER' ? roomSession.startAt : null);
   };
 
   // 源 onUnload L197-205
   const onHide = () => {
+    if (blockedEntry) {
+      blockedEntry = false;
+      return;
+    }
     clearAllTimers();
     removeNetworkListeners();
     voicePanelOpen = false;

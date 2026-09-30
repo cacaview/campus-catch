@@ -86,14 +86,20 @@ export class NetworkManager {
   /**
    * 服务器模式 (Server Mode)
    */
-  connectServer(serverUrl, playerInfo, passcode = '8888', gameArea = null, gameDurationSeconds = 600) {
+  connectServer(serverUrl, playerInfo, passcode = '8888', gameArea = null, gameDurationSeconds = 600, options = {}) {
     this.mode = NET_MODE.SERVER;
     this.targetUrl = serverUrl;
     this.passcode = passcode;
     this._setState(NET_STATE.CONNECTING);
 
     return this.wsAdapter.connect(serverUrl).then(() => {
-      this.send(MSG_TYPES.JOIN_ROOM, { passcode, player: playerInfo, gameArea, gameDurationSeconds });
+      this.send(MSG_TYPES.JOIN_ROOM, {
+        passcode,
+        player: playerInfo,
+        gameArea,
+        gameDurationSeconds,
+        createIfMissingRoom: options.createIfMissingRoom === true
+      });
     }).catch(err => {
       console.error('[NetworkManager] Server connect failed:', err);
       this._setState(NET_STATE.DISCONNECTED);
@@ -140,8 +146,7 @@ export class NetworkManager {
         break;
       case MSG_TYPES.JOIN_ACK:
         if (packet.payload.success) {
-          roomSession.gameArea = packet.payload.gameArea || roomSession.gameArea || null;
-          roomSession.gameDurationSeconds = packet.payload.gameDurationSeconds || roomSession.gameDurationSeconds || 600;
+          roomSession.applyJoinAck(packet.payload, packet.timestamp);
           console.log('[NetworkManager] Joined room successfully!');
           this.emit('joinSuccess', packet.payload);
         } else {
@@ -149,6 +154,22 @@ export class NetworkManager {
           this.emit('joinFail', packet.payload.reason);
           this.disconnect();
         }
+        break;
+      case MSG_TYPES.PLAYER_JOINED:
+        if (packet.payload?.player) roomSession.addMember(packet.payload.player);
+        this.emit(packet.type, packet.payload);
+        break;
+      case MSG_TYPES.PLAYER_LEFT:
+        if (packet.payload?.playerId != null) roomSession.removeMember(packet.payload.playerId);
+        this.emit(packet.type, packet.payload);
+        break;
+      case MSG_TYPES.ROOM_HOST_CHANGED:
+        roomSession.applyHostChange(packet.payload);
+        this.emit(packet.type, packet.payload);
+        break;
+      case MSG_TYPES.ROOM_STARTED:
+        roomSession.applyRoomStarted(packet.payload, packet.timestamp);
+        this.emit(packet.type, packet.payload);
         break;
       default:
         // 向上层派发具体事件
@@ -230,7 +251,13 @@ export class NetworkManager {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
     this.reconnectTimer = setTimeout(() => {
-      this.connectServer(this.targetUrl, roomSession.myPlayer);
+      this.connectServer(
+        this.targetUrl,
+        roomSession.myPlayer,
+        roomSession.passcode,
+        roomSession.gameArea,
+        roomSession.gameDurationSeconds
+      );
     }, delay);
   }
 

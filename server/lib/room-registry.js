@@ -20,8 +20,9 @@ const stringId = value => (typeof value === 'string' || typeof value === 'number
   : '';
 
 export class RoomRegistry {
-  constructor({ maxVoiceMembers = 8, now = Date.now } = {}) {
+  constructor({ maxVoiceMembers = 8, startedRoomReconnectGraceMs = 300_000, now = Date.now } = {}) {
     this.maxVoiceMembers = Math.max(1, Math.floor(Number(maxVoiceMembers) || 8));
+    this.startedRoomReconnectGraceMs = Math.max(0, Number(startedRoomReconnectGraceMs) || 300_000);
     this.now = now;
     this.rooms = new Map();
     this.connections = new WeakMap();
@@ -71,6 +72,9 @@ export class RoomRegistry {
       case 'VOICE_COUNTS_REQUEST':
         if (state.room) this.send(state, 'VOICE_COUNTS', { counts: this.voiceCounts(state.room) });
         return;
+      case 'ROOM_START_REQUEST':
+        this.startRoom(state);
+        return;
       default:
         if (GAME_PACKET_TYPES.has(packet.type) && state.room) {
           const forwarded = {
@@ -95,12 +99,35 @@ export class RoomRegistry {
       this.send(state, 'JOIN_ACK', { success: false, reason: '房间或玩家信息无效' });
       return;
     }
+    if (state.player && state.player.id !== playerId) {
+      this.send(state, 'JOIN_ACK', { success: false, reason: '当前连接已绑定其他玩家' });
+      return;
+    }
 
-    if (state.room) this.removeConnection(state.ws);
+    this.pruneExpiredRooms(passcode);
+    let room = this.rooms.get(passcode);
+    if (room?.phase === 'STARTED' && room.members.size === 0 && Number.isFinite(room.expiresAt) && this.now() >= room.expiresAt) {
+      this.rooms.delete(passcode);
+      this.send(state, 'JOIN_ACK', { success: false, reason: '活动已结束，请房主创建新房间' });
+      return;
+    }
+    if (room && payload.createIfMissingRoom === true) {
+      this.send(state, 'JOIN_ACK', { success: false, reason: '房间码已被使用，请重新创建' });
+      return;
+    }
+    if (room?.phase === 'STARTED' && !room.knownPlayerIds.has(playerId)) {
+      this.send(state, 'JOIN_ACK', { success: false, reason: '活动已开始，暂不接受加入' });
+      return;
+    }
+    if (!room && payload.createIfMissingRoom !== true) {
+      this.send(state, 'JOIN_ACK', { success: false, reason: '房间不存在或已结束，请检查邀请链接' });
+      return;
+    }
+
+    if (state.room && state.room !== room) this.removeConnection(state.ws);
     state.removed = false;
     this.connections.set(state.ws, state);
 
-    let room = this.rooms.get(passcode);
     if (!room) {
       const gameArea = isObject(payload.gameArea) ? payload.gameArea : null;
       const seconds = Number(payload.gameDurationSeconds);
@@ -108,6 +135,11 @@ export class RoomRegistry {
         passcode,
         roomId: `ROOM_${passcode}`,
         members: new Map(),
+        knownPlayerIds: new Set(),
+        hostId: playerId,
+        phase: 'WAITING',
+        startAt: null,
+        expiresAt: null,
         gameArea,
         gameDurationSeconds: Math.max(60, Math.min(7200, Number.isFinite(seconds) && seconds ? seconds : 600))
       };
@@ -124,7 +156,7 @@ export class RoomRegistry {
     };
     const previous = room.members.get(playerId);
     if (previous && previous !== state) {
-      this.removeConnection(previous.ws);
+      this.removeConnection(previous.ws, { preserveHost: true });
       if (this.rooms.get(passcode) !== room) this.rooms.set(passcode, room);
       try { previous.ws.close?.(4001, 'Player reconnected'); } catch { /* Ignore an already-closed socket. */ }
     }
@@ -133,17 +165,52 @@ export class RoomRegistry {
     state.voiceChannel = null;
     state.chatTimes = [];
     state.removed = false;
+    room.knownPlayerIds.add(playerId);
     room.members.set(playerId, state);
+    room.expiresAt = null;
 
     const members = this.members(room);
     this.send(state, 'JOIN_ACK', {
       success: true,
       roomId: room.roomId,
       members,
+      hostId: room.hostId,
+      isHost: playerId === room.hostId,
+      phase: room.phase,
+      startAt: room.startAt,
       gameArea: room.gameArea,
       gameDurationSeconds: room.gameDurationSeconds
     });
     this.broadcast(room, this.packet('PLAYER_JOINED', { player }, playerId), state.ws);
+  }
+
+  startRoom(state) {
+    if (!state.room || !state.player) {
+      this.send(state, 'ROOM_START_ERROR', { code: 'NOT_IN_ROOM', message: '请先加入房间' });
+      return;
+    }
+    const room = state.room;
+    if (room.phase === 'STARTED') {
+      this.send(state, 'ROOM_START_ERROR', { code: 'ALREADY_STARTED', message: '活动已经开始' });
+      return;
+    }
+    if (state.player.id !== room.hostId) {
+      this.send(state, 'ROOM_START_ERROR', { code: 'NOT_HOST', message: '只有房主可以开始活动' });
+      return;
+    }
+    const connectedMembers = [...room.members.values()].filter(member => member.ws.readyState === OPEN);
+    if (connectedMembers.length < 2) {
+      this.send(state, 'ROOM_START_ERROR', { code: 'WAITING_FOR_PLAYERS', message: '至少需要一名队员加入后才能开始' });
+      return;
+    }
+
+    room.phase = 'STARTED';
+    room.startAt = this.now() + 3000;
+    this.broadcast(room, this.packet('ROOM_STARTED', {
+      phase: room.phase,
+      hostId: room.hostId,
+      startAt: room.startAt
+    }));
   }
 
   handleChat(state, payload) {
@@ -223,7 +290,7 @@ export class RoomRegistry {
     this.send(state, 'VOICE_ERROR', { channel, code, message });
   }
 
-  removeConnection(ws) {
+  removeConnection(ws, { preserveHost = false } = {}) {
     const state = this.connections.get(ws);
     if (!state || state.removed) return;
     if (state.voiceChannel) this.leaveVoice(state);
@@ -232,8 +299,24 @@ export class RoomRegistry {
       room.members.delete(state.player.id);
       if (room.members.size > 0) {
         this.broadcast(room, this.packet('PLAYER_LEFT', { playerId: state.player.id }, state.player.id));
+        if (!preserveHost && room.phase === 'WAITING' && state.player.id === room.hostId) {
+          const nextHost = [...room.members.values()].find(member => member.ws.readyState === OPEN);
+          if (nextHost) {
+            room.hostId = nextHost.player.id;
+            this.broadcast(room, this.packet('ROOM_HOST_CHANGED', {
+              hostId: room.hostId,
+              members: this.members(room)
+            }));
+          }
+        }
       } else {
-        this.rooms.delete(room.passcode);
+        if (room.phase === 'STARTED') {
+          const graceEnd = this.now() + this.startedRoomReconnectGraceMs;
+          const plannedEnd = room.startAt + room.gameDurationSeconds * 1000 + this.startedRoomReconnectGraceMs;
+          room.expiresAt = Math.max(graceEnd, plannedEnd);
+        } else {
+          this.rooms.delete(room.passcode);
+        }
       }
     }
     state.room = null;
@@ -242,8 +325,21 @@ export class RoomRegistry {
     this.connections.delete(ws);
   }
 
+  pruneExpiredRooms(exceptPasscode) {
+    const now = this.now();
+    for (const [passcode, room] of this.rooms) {
+      if (passcode !== exceptPasscode && room.phase === 'STARTED' && room.members.size === 0 &&
+          Number.isFinite(room.expiresAt) && now >= room.expiresAt) {
+        this.rooms.delete(passcode);
+      }
+    }
+  }
+
   members(room) {
-    return [...room.members.values()].map(state => state.player);
+    return [...room.members.values()].map(state => ({
+      ...state.player,
+      isHost: state.player.id === room.hostId
+    }));
   }
 
   channelMembers(room, channel) {

@@ -74,30 +74,30 @@
 - `VOICE_SIGNAL.payload` is `{ targetId, channel, signal }`; forwarded payload adds server-derived `fromId` and can reach only an online target in the same game room and voice channel.
 - `VOICE_COUNTS_REQUEST` returns `{ counts: { global, cat, mouse } }` for the caller's game room; the relay broadcasts updated counts to that room after voice joins and leaves, without revealing member identities.
 
-- [ ] **Step 1: Create the ESM package/test harness** (`type: module`, `ws`, and `test` script) and write room-registry tests: `routesChatOnlyWithinJoinedRoom`, `usesJoinedIdentityForChat`, `forwardsExistingGameplayPacketsWithinRoom`, `rejectsWrongTeamForVoiceChannel`, `updatesRosterOnJoinAndLeave`, `routesVoiceSignalOnlyWithinSameRoomAndChannel`, and `enforcesVoiceLimitAndCleansDisconnectedMembers`. Add `relay.test.js` cases `healthEndpointReportsOk`, `iceConfigRequiresTurnSecret`, and `rejectsMalformedAndOversizedPackets`.
-- [ ] **Step 2: Run registry and relay tests and confirm they fail** with the missing modules/handlers.
+- [x] **Step 1: Create the ESM package/test harness** (`type: module`, `ws`, and `test` script) and write room-registry tests: `routesChatOnlyWithinJoinedRoom`, `usesJoinedIdentityForChat`, `forwardsExistingGameplayPacketsWithinRoom`, `rejectsWrongTeamForVoiceChannel`, `updatesRosterOnJoinAndLeave`, `routesVoiceSignalOnlyWithinSameRoomAndChannel`, and `enforcesVoiceLimitAndCleansDisconnectedMembers`. Add `relay.test.js` cases `healthEndpointReportsOk`, `iceConfigRequiresTurnSecret`, and `rejectsMalformedAndOversizedPackets`.
+- [x] **Step 2: Run registry and relay tests and confirm they fail** with the missing modules/handlers.
 
 Run: `cd server && npm install && node --test test/room-registry.test.js test/relay.test.js`
 
 Expected: failures for the unimplemented relay state and routing behavior.
 
-- [ ] **Step 3: Implement `RoomRegistry`** with per-connection player state, passcode-room routing, the four-message-per-second chat limit, 50-character chat limit, JSON/protocol validation, server-owned sender identity, voice team/channel checks, voice member capacity enforcement, and room-scoped forwarding for every existing game `MSG_TYPES` packet.
-- [ ] **Step 4: Write TURN credential tests** for expiry, ICE URLs, deterministic HMAC credential generation, and missing secret handling.
-- [ ] **Step 5: Run TURN credential tests and confirm they fail** because `createIceConfig()` is missing.
+- [x] **Step 3: Implement `RoomRegistry`** with per-connection player state, passcode-room routing, the four-message-per-second chat limit, 50-character chat limit, JSON/protocol validation, server-owned sender identity, voice team/channel checks, voice member capacity enforcement, and room-scoped forwarding for every existing game `MSG_TYPES` packet.
+- [x] **Step 4: Write TURN credential tests** for expiry, ICE URLs, deterministic HMAC credential generation, and missing secret handling.
+- [x] **Step 5: Run TURN credential tests and confirm they fail** because `createIceConfig()` is missing.
 
 Run: `cd server && node --test test/turn-credentials.test.js`
 
 Expected: failures for the missing credential helper.
 
-- [ ] **Step 6: Implement `createIceConfig()`** with a one-hour username expiry and short-lived credentials; never return or log the shared secret.
-- [ ] **Step 7: Implement `createRelayServer()`** with `/healthz`, `/api/ice-config`, WebSocket path `/ws`, a 64 KiB payload ceiling that closes oversized frames with code 1009, malformed JSON rejection without process failure, missing-secret handling (503), and clean listen/close behavior for tests and systemd.
-- [ ] **Step 8: Run relay tests and review output.**
+- [x] **Step 6: Implement `createIceConfig()`** with a one-hour username expiry and short-lived credentials; never return or log the shared secret.
+- [x] **Step 7: Implement `createRelayServer()`** with `/healthz`, `/api/ice-config`, WebSocket path `/ws`, a 64 KiB payload ceiling that closes oversized frames with code 1009, malformed JSON rejection without process failure, missing-secret handling (503), and clean listen/close behavior for tests and systemd.
+- [x] **Step 8: Run relay tests and review output.**
 
 Run: `cd server && node --test test/*.test.js`
 
 Expected: all room routing, validation, channel-capacity, cleanup, and credential tests pass.
 
-- [ ] **Step 9: Commit the relay service.**
+- [x] **Step 9: Commit the relay service.**
 
 ### Task 2: Safe text chat and default WSS endpoint
 
@@ -112,16 +112,16 @@ Expected: all room routing, validation, channel-capacity, cleanup, and credentia
 - Chat continues to use `MSG_TYPES.CHAT_MESSAGE` with `{ sender, text }`; the relay replaces the display sender with the joined player name.
 - The join/invite query parameter continues to override the default server address.
 
-- [ ] **Step 1: Add browser checklist cases** for default relay prefill, query override, two-client same-room chat, different-room isolation, 50-character maximum, and `<img src=x onerror=alert(1)>` rendering literally.
-- [ ] **Step 2: Implement the default URL** in the server-mode field without overriding an invite URL or a user's manual edit.
-- [ ] **Step 3: Change chat rendering to DOM text nodes** (`textContent`) for sender and message rather than interpolation into `innerHTML`; retain the recent-eight display window and input limit.
-- [ ] **Step 4: Run the existing unit suite and verify the chat checklist locally** with the Node relay on `localhost:8081` and two browser contexts served from `localhost`.
+- [x] **Step 1: Add browser checklist cases** for default relay prefill, query override, two-client same-room chat, different-room isolation, 50-character maximum, and `<img src=x onerror=alert(1)>` rendering literally.
+- [x] **Step 2: Implement the default URL** in the server-mode field without overriding an invite URL or a user's manual edit.
+- [x] **Step 3: Change chat rendering to DOM text nodes** (`textContent`) for sender and message rather than interpolation into `innerHTML`; retain the recent-eight display window and input limit.
+- [x] **Step 4: Run the existing unit suite and verify the chat checklist locally** with the Node relay on `localhost:8081` and two browser contexts served from `localhost`.
 
 Run: `node --test test/*.test.js`
 
 Expected: existing tests pass; default/query URL handling, same-room delivery, room isolation, message length, and inert rendering pass in the local browser.
 
-- [ ] **Step 5: Commit the safe chat and default endpoint.**
+- [x] **Step 5: Commit the safe chat and default endpoint.**
 
 ### Task 3: Browser WebRTC voice manager
 
@@ -138,23 +138,23 @@ Expected: existing tests pass; default/query URL handling, same-room delivery, r
 - `refreshChannelCounts()` requests room-local aggregate counts; `countsChange(counts)` reports authoritative channel counts for UI cards.
 - Only `global`, `cat`, and `mouse` are accepted. Team mismatch, offline networking, and a server-reported full channel reject the join.
 
-- [ ] **Step 1: Write named tests**: `joinsAllowedChannelWithMicAndIceConfig`, `reportsMediaFailureWithoutJoining`, `rejectsTeamMismatch`, `muteTogglesLocalTracks`, `onlyLowerPlayerIdCreatesOffer`, `handlesIncomingOfferAnswerAndIce`, `peerLeftClosesConnection`, `leaveCancelsPendingJoinAndStopsTracks`, and `networkDisconnectStopsTracksAndRequiresManualRejoin`.
-- [ ] **Step 2: Run the focused tests and confirm the manager behavior is missing.**
+- [x] **Step 1: Write named tests**: `joinsAllowedChannelWithMicAndIceConfig`, `reportsMediaFailureWithoutJoining`, `rejectsTeamMismatch`, `muteTogglesLocalTracks`, `onlyLowerPlayerIdCreatesOffer`, `handlesIncomingOfferAnswerAndIce`, `peerLeftClosesConnection`, `leaveCancelsPendingJoinAndStopsTracks`, and `networkDisconnectStopsTracksAndRequiresManualRejoin`.
+- [x] **Step 2: Run the focused tests and confirm the manager behavior is missing.**
 
 Run: `node --test test/voice-manager.test.js`
 
 Expected: failures for the missing manager and its public methods/events.
 
-- [ ] **Step 3: Add voice message constants** to `MSG_TYPES` without changing existing protocol names.
-- [ ] **Step 4: Implement `VoiceManager`** using injected media/network adapters, a join-generation token for cancellation, one mic stream, a map of peer connections, deterministic initiator ordering by player ID, and remote audio elements. Do not send `VOICE_JOIN` until local microphone and ICE setup succeed.
-- [ ] **Step 5: Implement cleanup and reconnection behavior:** disable/stop all local tracks, close peer connections/audio elements, send `VOICE_LEAVE`, and require manual rejoin after network reconnection.
-- [ ] **Step 6: Run voice and existing network tests.**
+- [x] **Step 3: Add voice message constants** to `MSG_TYPES` without changing existing protocol names.
+- [x] **Step 4: Implement `VoiceManager`** using injected media/network adapters, a join-generation token for cancellation, one mic stream, a map of peer connections, deterministic initiator ordering by player ID, and remote audio elements. Do not send `VOICE_JOIN` until local microphone and ICE setup succeed.
+- [x] **Step 5: Implement cleanup and reconnection behavior:** disable/stop all local tracks, close peer connections/audio elements, send `VOICE_LEAVE`, and require manual rejoin after network reconnection.
+- [x] **Step 6: Run voice and existing network tests.**
 
 Run: `node --test test/voice-manager.test.js test/network.test.js`
 
 Expected: voice tests pass and existing network lifecycle behavior remains unchanged.
 
-- [ ] **Step 7: Commit the WebRTC voice manager.**
+- [x] **Step 7: Commit the WebRTC voice manager.**
 
 ### Task 4: Game voice panel and lifecycle integration
 
@@ -169,16 +169,16 @@ Expected: voice tests pass and existing network lifecycle behavior remains uncha
 - Per-channel counts are room-scoped, include at most eight members, and update whenever a participant joins or leaves a voice channel.
 - Closing the panel keeps the connection; explicit leave or game lifecycle cleanup terminates it.
 
-- [ ] **Step 1: Add UI checklist cases** for offline disabled state, channel counts, join/switch/leave, mute, panel close while still joined, media permission denial, and cleanup on game end.
-- [ ] **Step 2: Add the panel markup and CSS** following current mobile-safe game overlays and toolbar styles.
-- [ ] **Step 3: Wire game lifecycle and UI controls** to the Task 3 manager; render the disabled explanation in offline mode and keep all existing game input handlers.
-- [ ] **Step 4: Run unit and browser regression checks.**
+- [x] **Step 1: Add UI checklist cases** for offline disabled state, channel counts, join/switch/leave, mute, panel close while still joined, media permission denial, and cleanup on game end.
+- [x] **Step 2: Add the panel markup and CSS** following current mobile-safe game overlays and toolbar styles.
+- [x] **Step 3: Wire game lifecycle and UI controls** to the Task 3 manager; render the disabled explanation in offline mode and keep all existing game input handlers.
+- [x] **Step 4: Run unit and browser regression checks.**
 
 Run: `node --test test/*.test.js`
 
 Expected: all unit tests pass. In a browser, the checklist's existing single-player flows still pass and the voice panel is usable at 375×812.
 
-- [ ] **Step 5: Commit voice panel integration.**
+- [x] **Step 5: Commit voice panel integration.**
 
 ### Task 5: Nginx, Coturn, systemd, and certificate deployment files
 
@@ -225,7 +225,7 @@ Expected: no whitespace issues; repository config contains placeholders only and
 - [x] **Step 5: Request an ACME staging IP certificate first** with Certbot's `--webroot`, `--ip-address 106.53.199.187`, and `--preferred-profile shortlived`; confirm HTTP-01 reachability, then request the production certificate and enable automatic renewal plus Nginx reload hook.
 - [x] **Step 6: Install the full HTTPS/WSS Nginx config** and validate it with `nginx -t`; validate the systemd unit with `systemd-analyze verify`, then enable Coturn, relay, Nginx, and renewal services.
 - [x] **Step 7: Verify public HTTPS, certificate SAN/expiry, `/healthz`, WSS handshake, same-room chat, different-room isolation, `/api/ice-config` expiry, and systemd/timer status.**
-- [ ] **Step 8: Run two-client browser checks on separate devices or networks** for real audio, channel isolation, roster counts, mute, leave, and permission denial. The real microphone/media check remains manual because no second device was available and browser microphone permission was not granted.
+- [ ] **Step 8: Run two-client browser checks on separate devices or networks** for real audio, channel isolation, roster counts, mute, leave, and permission denial. Protocol checks and voice-manager tests pass; final two-device microphone/TURN media and deployed lobby UI remain manual because browser controls and a second microphone-enabled client were unavailable.
 - [x] **Step 9: Record actual deployment results** in the checklist and README, then commit deployment notes only after checking them against the live server.
 
 ### Post-deployment review hardening (2026-09-29)

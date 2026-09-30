@@ -7,6 +7,12 @@ export const MSG_TYPES = {
   // 基础连接与握手
   JOIN_ROOM: 'JOIN_ROOM',         // 加入房间 (含身份码)
   JOIN_ACK: 'JOIN_ACK',           // 加入确认 (成功/失败)
+  PLAYER_JOINED: 'PLAYER_JOINED',
+  PLAYER_LEFT: 'PLAYER_LEFT',
+  ROOM_START_REQUEST: 'ROOM_START_REQUEST',
+  ROOM_STARTED: 'ROOM_STARTED',
+  ROOM_START_ERROR: 'ROOM_START_ERROR',
+  ROOM_HOST_CHANGED: 'ROOM_HOST_CHANGED',
   LEAVE_ROOM: 'LEAVE_ROOM',       // 离开房间
 
   // 心跳保活

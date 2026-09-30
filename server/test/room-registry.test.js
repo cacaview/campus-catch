@@ -28,14 +28,15 @@ class FakeSocket {
 const player = (id, team = 'cat') => ({ id, name: `Player ${id}`, team });
 const packet = (type, payload = {}, senderId = '') => ({ type, senderId, timestamp: 1, payload });
 
-function joined(registry, id, passcode = '1234', team = 'cat') {
+function joined(registry, id, passcode = '1234', team = 'cat', createIfMissingRoom = !registry.rooms.has(passcode)) {
   const socket = new FakeSocket();
   registry.onConnection(socket);
   registry.handlePacket(socket, packet('JOIN_ROOM', {
     passcode,
     player: player(id, team),
     gameArea: null,
-    gameDurationSeconds: 600
+    gameDurationSeconds: 600,
+    createIfMissingRoom
   }, id));
   return socket;
 }
@@ -197,4 +198,140 @@ test('enforcesVoiceLimitAndCleansDisconnectedMembers', () => {
   registry.handlePacket(fourth, packet('VOICE_JOIN', { channel: 'global' }));
   assert.equal(fourth.packets('VOICE_ROSTER').at(-1)?.payload.members.length, 2);
   assert.equal(first.packets('VOICE_PEER_LEFT').some(p => p.payload.playerId === 'second'), true);
+});
+
+test('assignsFirstMemberAsHostAndReturnsWaitingPhase', () => {
+  const registry = new RoomRegistry();
+  const host = joined(registry, 'host');
+  const guest = joined(registry, 'guest');
+
+  const hostAck = host.packets('JOIN_ACK')[0].payload;
+  const guestAck = guest.packets('JOIN_ACK')[0].payload;
+  assert.equal(hostAck.phase, 'WAITING');
+  assert.equal(hostAck.hostId, 'host');
+  assert.equal(hostAck.isHost, true);
+  assert.equal(hostAck.members.find(member => member.id === 'host').isHost, true);
+  assert.equal(guestAck.phase, 'WAITING');
+  assert.equal(guestAck.hostId, 'host');
+  assert.equal(guestAck.isHost, false);
+});
+
+test('onlyHostCanStartAfterAnotherPlayerJoins', () => {
+  let now = 1000;
+  const registry = new RoomRegistry({ now: () => now });
+  const host = joined(registry, 'host');
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+  assert.equal(host.packets('ROOM_START_ERROR').at(-1)?.payload.code, 'WAITING_FOR_PLAYERS');
+  assert.equal(host.packets('ROOM_STARTED').length, 0);
+
+  const guest = joined(registry, 'guest');
+  host.clear();
+  guest.clear();
+
+  registry.handlePacket(guest, packet('ROOM_START_REQUEST'));
+  assert.equal(guest.packets('ROOM_START_ERROR').at(-1)?.payload.code, 'NOT_HOST');
+  assert.equal(host.packets('ROOM_STARTED').length, 0);
+
+  now = 2000;
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+  assert.equal(host.packets('ROOM_STARTED').length, 1);
+  assert.equal(guest.packets('ROOM_STARTED').length, 1);
+  assert.equal(host.packets('ROOM_STARTED')[0].payload.phase, 'STARTED');
+  assert.equal(host.packets('ROOM_STARTED')[0].payload.startAt, 5000);
+
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+  assert.equal(host.packets('ROOM_STARTED').length, 1, 'duplicate request cannot restart the room');
+  assert.equal(host.packets('ROOM_START_ERROR').at(-1)?.payload.code, 'ALREADY_STARTED');
+});
+
+test('does not let one socket join as multiple players to satisfy room start', () => {
+  const registry = new RoomRegistry();
+  const host = joined(registry, 'host');
+
+  registry.handlePacket(host, packet('JOIN_ROOM', {
+    passcode: '1234',
+    player: player('spoof', 'mouse'),
+    gameArea: null,
+    gameDurationSeconds: 600
+  }));
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+
+  assert.equal(host.packets('JOIN_ACK').at(-1)?.payload.success, false);
+  assert.equal(host.packets('ROOM_START_ERROR').at(-1)?.payload.code, 'WAITING_FOR_PLAYERS');
+  assert.equal(host.packets('ROOM_STARTED').length, 0);
+  assert.equal(registry.rooms.get('1234').members.size, 1);
+});
+
+test('rejectsLateJoinButAllowsKnownPlayerReconnect', () => {
+  let now = 1000;
+  const registry = new RoomRegistry({ now: () => now });
+  const host = joined(registry, 'host');
+  const guest = joined(registry, 'guest');
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+
+  const late = new FakeSocket();
+  registry.onConnection(late);
+  registry.handlePacket(late, packet('JOIN_ROOM', {
+    passcode: '1234', player: player('late'), gameArea: null, gameDurationSeconds: 600
+  }));
+  assert.equal(late.packets('JOIN_ACK').at(-1)?.payload.success, false);
+  assert.match(late.packets('JOIN_ACK').at(-1)?.payload.reason, /活动已开始/);
+
+  const reconnectedGuest = joined(registry, 'guest');
+  const reconnectAck = reconnectedGuest.packets('JOIN_ACK').at(-1)?.payload;
+  assert.equal(reconnectAck.success, true);
+  assert.equal(reconnectAck.phase, 'STARTED');
+  assert.equal(reconnectAck.hostId, 'host');
+  assert.equal(guest.readyState, 3);
+});
+
+test('retains an empty started room for known reconnects, then expires it', () => {
+  let now = 1000;
+  const registry = new RoomRegistry({ now: () => now, startedRoomReconnectGraceMs: 5000 });
+  const host = joined(registry, 'host');
+  const guest = joined(registry, 'guest');
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+  const room = registry.rooms.get('1234');
+  const startAt = room.startAt;
+
+  now = 2000;
+  registry.removeConnection(host);
+  registry.removeConnection(guest);
+  assert.equal(registry.rooms.get('1234').phase, 'STARTED');
+
+  const reconnectedGuest = joined(registry, 'guest');
+  const reconnectAck = reconnectedGuest.packets('JOIN_ACK').at(-1)?.payload;
+  assert.equal(reconnectAck.success, true);
+  assert.equal(reconnectAck.phase, 'STARTED');
+  assert.equal(reconnectAck.startAt, startAt);
+
+  registry.removeConnection(reconnectedGuest);
+  now = room.expiresAt + 1;
+  const expiredJoin = joined(registry, 'late-guest');
+  assert.equal(expiredJoin.packets('JOIN_ACK').at(-1)?.payload.success, false);
+  assert.match(expiredJoin.packets('JOIN_ACK').at(-1)?.payload.reason, /活动已结束/);
+  assert.equal(registry.rooms.has('1234'), false);
+
+  const retry = new FakeSocket();
+  registry.onConnection(retry);
+  registry.handlePacket(retry, packet('JOIN_ROOM', {
+    passcode: '1234', player: player('late-guest'), gameArea: null, gameDurationSeconds: 600
+  }));
+  assert.equal(retry.packets('JOIN_ACK').at(-1)?.payload.success, false);
+});
+
+test('promotesNextMemberWhenWaitingHostDisconnects', () => {
+  const registry = new RoomRegistry();
+  const host = joined(registry, 'host');
+  const nextHost = joined(registry, 'next-host');
+  const remaining = joined(registry, 'remaining');
+  for (const socket of [host, nextHost, remaining]) socket.clear();
+
+  registry.removeConnection(host);
+
+  for (const socket of [nextHost, remaining]) {
+    const change = socket.packets('ROOM_HOST_CHANGED').at(-1)?.payload;
+    assert.equal(change.hostId, 'next-host');
+    assert.equal(change.members.find(member => member.id === 'next-host').isHost, true);
+  }
 });
