@@ -126,4 +126,4 @@ Expected: all Web and relay unit tests pass. Manual checklist confirms two clien
 - [x] Final suites after all fixes: Web 89/89; relay 23/23. Final review found no remaining issue; deployed client hashes match the worktree.
 - [x] Production services and endpoints rechecked: HTTPS and ICE config return 200; Nginx, relay, and Coturn are active.
 - [ ] Final browser UI flow and real microphone/TURN audio remain manual. This task context had no browser-control surface or second microphone-enabled client; do not describe the wire playtest as a browser UI test.
-- Integration: codex/web-online-features is to be merged locally into main after this playtest; record resulting commit IDs after merge.
+- Integration: `codex/web-online-features` was fast-forward merged into `main` on 2026-09-30. Feature commit: `6baaca5` (based on `9c50e8e`); this handoff note records the final integrated state. The merge is local and has not been pushed. The managed worktree was archived and the merged feature branch deleted.
