@@ -70,8 +70,8 @@ chmod 0600 /etc/game-web-relay.env
 从项目根目录在本地执行，将 Web 客户端和 relay 文件分别上传：
 
 ```sh
-rsync -a -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" index.html css js vendor root@106.53.199.187:/var/www/game-web/
-rsync -a -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" server/ root@106.53.199.187:/opt/game-web/server/
+rsync -ac -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" index.html css js vendor assets root@106.53.199.187:/var/www/game-web/
+rsync -ac --exclude=node_modules/ -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" server/ root@106.53.199.187:/opt/game-web/server/
 scp -i "$KEY_FILE" -o IdentitiesOnly=yes deploy/systemd/game-web-relay.service root@106.53.199.187:/etc/systemd/system/game-web-relay.service
 scp -i "$KEY_FILE" -o IdentitiesOnly=yes deploy/turnserver.conf.example root@106.53.199.187:/opt/game-web/turnserver.conf.example
 ```

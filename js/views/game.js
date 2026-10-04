@@ -1,10 +1,10 @@
 // js/views/game.js — 游戏视图（源 pages/game/game.js 1286 行移植）
 // Web 版恢复房间聊天与 WebRTC 语音；wx→platform：定位与地图走浏览器适配层
 // wx→platform：getLocation→geo，showModal/showActionSheet→ui（Promise 化），地图→MapLibre 封装
-import { navigate, DEFAULT_CENTER } from '../main.js';
+import { navigate, DEFAULT_CENTER } from '../main.js?v=347ee3abc67c';
 import { showToast, showModal, showActionSheet } from '../platform/ui.js';
 import { getLocation, startLocationUpdate, stopLocationUpdate } from '../platform/geo.js';
-import { createMap } from '../lib/map.js';
+import { createMap } from '../lib/map.js?v=mapblend-20261003a';
 import { networkManager } from '../utils/network/network-manager.js';
 import { roomSession } from '../utils/network/room-session.js';
 import { MSG_TYPES } from '../utils/network/protocol.js';
@@ -62,6 +62,7 @@ const GAME_HTML = `
       <span class="pause-icon">⏸</span>
       <span class="pause-title">活动已暂停</span>
       <span class="pause-sub" id="game-pause-sub"></span>
+      <button class="btn btn-primary" id="game-resume" hidden>继续活动</button>
     </div>
   </div>
 
@@ -189,7 +190,7 @@ export function create(rootEl, globalStateRef) {
     xrayUntil: 0,
     decoyUntil: 0,
     radarUntil: 0,
-    satellite: true, // 与地图默认一致：卫星底图（街道图 OSM 国内常不可达）
+    satellite: false, // 与地图默认一致：校园图
     scanUntil: 0,
     showRankModal: false,
     liveRank: [],
@@ -200,6 +201,7 @@ export function create(rootEl, globalStateRef) {
   /* ---------- 实例字段（源 this._xxx） ---------- */
   let map = null;
   let aiPlayers = [];
+  const pendingMapItemPickups = new Set();
   let gameArea = null;
   let countdownTimer = null;
   let blockedEntry = false;
@@ -253,7 +255,8 @@ export function create(rootEl, globalStateRef) {
     $('game-countdown').hidden = s.gamePhase !== 'COUNTDOWN';
     $('game-countdown-num').textContent = s.countdown;
     $('game-pause').hidden = !s.isPaused;
-    $('game-pause-sub').textContent = s.isHost ? '点击顶部 👑 可继续活动' : '等待房主恢复活动…';
+    $('game-pause-sub').textContent = s.isHost ? '准备好后继续活动' : '等待房主恢复活动…';
+    $('game-resume').hidden = !s.isHost;
   };
 
   const renderNetStatus = (text, cls) => {
@@ -580,6 +583,7 @@ export function create(rootEl, globalStateRef) {
 
   const setupNetworkListeners = () => {
     netHandlers.stateChange = ({ state, mode }) => {
+      if (state !== 'CONNECTED') pendingMapItemPickups.clear();
       let statusText = '单机模式';
       let dotClass = 'dot-offline';
       if (mode === 'SERVER') {
@@ -605,6 +609,26 @@ export function create(rootEl, globalStateRef) {
       if (payload && payload.id) updateRemotePlayerPosition(payload);
     };
 
+    netHandlers.mapItemPickup = payload => {
+      if (!payload || payload.itemId == null || payload.playerId == null) return;
+      pendingMapItemPickups.delete(Number(payload.itemId));
+      const item = MapItemsManager.removeItemById(payload.itemId);
+      if (!item) return;
+      const myId = globalStateRef.currentPlayer && globalStateRef.currentPlayer.id;
+      if (String(payload.playerId) === String(myId)) awardMapItemPickup(item);
+      renderMarkers();
+    };
+
+    netHandlers.joinSuccess = () => {
+      // A reconnecting client gets the relay's authoritative picked-item list
+      // in JOIN_ACK and removes those items from its deterministic local set.
+      let changed = false;
+      (roomSession.pickedMapItemIds || []).forEach(id => {
+        if (MapItemsManager.removeItemById(id)) changed = true;
+      });
+      if (changed) renderMarkers();
+    };
+
     netHandlers.catchEvent = payload => {
       if (payload) onCatchEvent(payload.catName, payload.mouseName, payload.success);
     };
@@ -623,6 +647,8 @@ export function create(rootEl, globalStateRef) {
       const seconds = Number(payload && payload.seconds) || 0;
       if (seconds > 0) applyExtend(seconds, true);
     };
+
+    netHandlers.gameEnd = () => endGame(true);
 
     netHandlers.playerKick = payload => {
       if (!payload) return;
@@ -659,10 +685,13 @@ export function create(rootEl, globalStateRef) {
 
     networkManager.on('stateChange', netHandlers.stateChange);
     networkManager.on(MSG_TYPES.PLAYER_MOVE, netHandlers.playerMove);
+    networkManager.on(MSG_TYPES.MAP_ITEM_PICKUP, netHandlers.mapItemPickup);
+    networkManager.on('joinSuccess', netHandlers.joinSuccess);
     networkManager.on(MSG_TYPES.CATCH_EVENT, netHandlers.catchEvent);
     networkManager.on(MSG_TYPES.CHAT_MESSAGE, netHandlers.chatMessage);
     networkManager.on(MSG_TYPES.GAME_PAUSE, netHandlers.gamePause);
     networkManager.on(MSG_TYPES.GAME_EXTEND, netHandlers.gameExtend);
+    networkManager.on(MSG_TYPES.GAME_END, netHandlers.gameEnd);
     networkManager.on(MSG_TYPES.PLAYER_KICK, netHandlers.playerKick);
     networkManager.on(MSG_TYPES.RECONNECT, netHandlers.reconnectRequest);
     networkManager.on(MSG_TYPES.SYNC_ROOM_STATE, netHandlers.syncRoomState);
@@ -671,10 +700,13 @@ export function create(rootEl, globalStateRef) {
   const removeNetworkListeners = () => {
     if (netHandlers.stateChange) networkManager.off('stateChange', netHandlers.stateChange);
     if (netHandlers.playerMove) networkManager.off(MSG_TYPES.PLAYER_MOVE, netHandlers.playerMove);
+    if (netHandlers.mapItemPickup) networkManager.off(MSG_TYPES.MAP_ITEM_PICKUP, netHandlers.mapItemPickup);
+    if (netHandlers.joinSuccess) networkManager.off('joinSuccess', netHandlers.joinSuccess);
     if (netHandlers.catchEvent) networkManager.off(MSG_TYPES.CATCH_EVENT, netHandlers.catchEvent);
     if (netHandlers.chatMessage) networkManager.off(MSG_TYPES.CHAT_MESSAGE, netHandlers.chatMessage);
     if (netHandlers.gamePause) networkManager.off(MSG_TYPES.GAME_PAUSE, netHandlers.gamePause);
     if (netHandlers.gameExtend) networkManager.off(MSG_TYPES.GAME_EXTEND, netHandlers.gameExtend);
+    if (netHandlers.gameEnd) networkManager.off(MSG_TYPES.GAME_END, netHandlers.gameEnd);
     if (netHandlers.playerKick) networkManager.off(MSG_TYPES.PLAYER_KICK, netHandlers.playerKick);
     if (netHandlers.reconnectRequest) networkManager.off(MSG_TYPES.RECONNECT, netHandlers.reconnectRequest);
     if (netHandlers.syncRoomState) networkManager.off(MSG_TYPES.SYNC_ROOM_STATE, netHandlers.syncRoomState);
@@ -879,29 +911,44 @@ export function create(rootEl, globalStateRef) {
 
   /* ---------- 主循环（源 gameTick L608-725 原样移植） ---------- */
 
+  const awardMapItemPickup = pickedItem => {
+    soundVibration.playSound('skill_used');
+    const pickGain = 10 * (cheeseMultiplier || 1);
+    if (pickedItem.type === 'CHEESE') {
+      s.myScore += pickGain;
+      addSystemMessage(`🧀 真实打卡 [能量奶酪]，积分 +${pickGain}！`);
+    } else if (pickedItem.type === 'CATNIP') {
+      s.myScore += pickGain;
+      addSystemMessage(`🌿 拾取 [猫薄荷]，积分 +${pickGain}！`);
+    } else if (pickedItem.type === 'TRAP') {
+      soundVibration.playSound('trap_triggered');
+      addSystemMessage('🪤 警报！你踩中了 [捕鼠陷阱] 区域！广播暴露位置！');
+    } else if (pickedItem.type === 'BUSH') {
+      addSystemMessage('🌫️ 你进入了 [隐蔽草丛]，位置标记遮蔽');
+    }
+    renderHud();
+  };
+
   const gameTick = () => {
     if (s.isOutsideArea || s.isPaused) return;
     let changed = false;
 
     const currentPos = { latitude: s.latitude, longitude: s.longitude };
-    const pickedItem = MapItemsManager.checkItemPickup(currentPos, s.myTeam === 'cat');
+    let pickedItem = null;
+    if (s.netMode === 'OFFLINE') {
+      pickedItem = MapItemsManager.checkItemPickup(currentPos, s.myTeam === 'cat');
+    } else {
+      const candidate = MapItemsManager.findItemPickup(currentPos, s.myTeam === 'cat');
+      if (candidate && !pendingMapItemPickups.has(candidate.id)) {
+        pendingMapItemPickups.add(candidate.id);
+        if (!networkManager.send(MSG_TYPES.MAP_ITEM_PICKUP, { itemId: candidate.id })) {
+          pendingMapItemPickups.delete(candidate.id);
+        }
+      }
+    }
 
     if (pickedItem) {
-      soundVibration.playSound('skill_used');
-      const pickGain = 10 * (cheeseMultiplier || 1);
-      if (pickedItem.type === 'CHEESE') {
-        s.myScore += pickGain;
-        addSystemMessage(`🧀 真实打卡 [能量奶酪]，积分 +${pickGain}！`);
-      } else if (pickedItem.type === 'CATNIP') {
-        s.myScore += pickGain;
-        addSystemMessage(`🌿 拾取 [猫薄荷]，积分 +${pickGain}！`);
-      } else if (pickedItem.type === 'TRAP') {
-        soundVibration.playSound('trap_triggered');
-        addSystemMessage('🪤 警报！你踩中了 [捕鼠陷阱] 区域！广播暴露位置！');
-      } else if (pickedItem.type === 'BUSH') {
-        addSystemMessage('🌫️ 你进入了 [隐蔽草丛]，位置标记遮蔽');
-      }
-      renderHud();
+      awardMapItemPickup(pickedItem);
       changed = true;
     }
 
@@ -1148,7 +1195,7 @@ export function create(rootEl, globalStateRef) {
   const onViewToggle = () => {
     s.satellite = !s.satellite;
     if (map) map.setSatellite(s.satellite);
-    showToast({ title: s.satellite ? '已切换卫星图' : '已切换标准图', icon: 'none' });
+    showToast({ title: s.satellite ? '已切换卫星图' : '已切换校园图', icon: 'none' });
   };
 
   const onScan = () => {
@@ -1327,8 +1374,11 @@ export function create(rootEl, globalStateRef) {
     }
   };
 
-  const endGame = () => {
+  const endGame = (fromNet = false) => {
     if (s.gamePhase === 'END') return; // 防倒计时归零与提前结算重复触发
+    if (!fromNet && s.isHost && s.netMode !== 'OFFLINE') {
+      networkManager.send(MSG_TYPES.GAME_END, {});
+    }
     clearAllTimers();
     soundVibration.playSound('catch_success');
     s.gamePhase = 'END';
@@ -1413,6 +1463,9 @@ export function create(rootEl, globalStateRef) {
     renderVoicePanel();
   });
   $('game-host-btn').addEventListener('click', onHostMenu);
+  $('game-resume').addEventListener('click', () => {
+    if (s.isHost) resumeGame();
+  });
   $('game-backpack-btn').addEventListener('click', toggleBackpack);
   $('game-skills').addEventListener('click', e => {
     const card = e.target.closest('[data-skill]');
@@ -1498,7 +1551,7 @@ export function create(rootEl, globalStateRef) {
     s.xrayUntil = 0;
     s.decoyUntil = 0;
     s.radarUntil = 0;
-    s.satellite = true; // 与地图默认一致：卫星底图（街道图 OSM 国内常不可达）
+    s.satellite = false; // 与地图默认一致：校园图
     s.scanUntil = 0;
     s.showRankModal = false;
     s.liveRank = [];
@@ -1530,10 +1583,6 @@ export function create(rootEl, globalStateRef) {
         center: [s.longitude, s.latitude],
         zoom: 16
       });
-      map.onBasemapFallback = () => {
-        s.satellite = true; // 保持视图切换按钮的状态一致
-        addSystemMessage('📡 街道地图加载失败，已自动切换卫星图');
-      };
     }
     if (GameArea.isValidArea(gameArea)) {
       map.setPolygon(gameArea.points);
@@ -1553,10 +1602,17 @@ export function create(rootEl, globalStateRef) {
     renderCatch();
 
     // 刷出地图打卡点与道具
-    MapItemsManager.spawnItems(
-      areaCenter || { latitude: s.latitude, longitude: s.longitude },
-      8
-    );
+    const itemArea = GameArea.isValidArea(gameArea)
+      ? gameArea
+      : areaCenter || { latitude: s.latitude, longitude: s.longitude };
+    const itemSeed = netMode === 'SERVER'
+      ? `${roomSession.roomId || roomSession.passcode}|${JSON.stringify(GameArea.isValidArea(gameArea) ? gameArea.points : itemArea)}`
+      : null;
+    pendingMapItemPickups.clear();
+    MapItemsManager.spawnItems(itemArea, 8, itemSeed);
+    if (netMode === 'SERVER') {
+      (roomSession.pickedMapItemIds || []).forEach(id => MapItemsManager.removeItemById(id));
+    }
 
     setupNetworkListeners();
     setupVoiceManager();

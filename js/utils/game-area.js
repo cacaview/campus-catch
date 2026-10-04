@@ -40,6 +40,19 @@ function center(area) {
   return { latitude: sum.latitude / area.points.length, longitude: sum.longitude / area.points.length };
 }
 
+function rebasePoints(points, legacyCenter, targetCenter, thresholdMeters = 2500) {
+  const area = { type: 'polygon', points };
+  if (!isValidArea(area) || !legacyCenter || !targetCenter) return points;
+  if (distanceMeters(center(area), legacyCenter) > thresholdMeters) return points;
+  const latitudeOffset = Number(targetCenter.latitude) - Number(legacyCenter.latitude);
+  const longitudeOffset = Number(targetCenter.longitude) - Number(legacyCenter.longitude);
+  return points.map(point => ({
+    ...point,
+    latitude: Number(point.latitude) + latitudeOffset,
+    longitude: Number(point.longitude) + longitudeOffset
+  }));
+}
+
 // 将无序点击的边界点按中心极角排列，避免地图 polygon 出现交叉连线。
 function orderBoundaryPoints(points) {
   if (!Array.isArray(points) || points.length < 3) return Array.isArray(points) ? points.slice() : [];
@@ -54,4 +67,4 @@ function orderBoundaryPoints(points) {
   });
 }
 
-export default { distanceMeters, isValidArea, contains, center, orderBoundaryPoints };
+export default { distanceMeters, isValidArea, contains, center, rebasePoints, orderBoundaryPoints };

@@ -1,11 +1,11 @@
 // js/main.js — 路由 + 全局状态（原 app.js 的 globalData）
 // 视图模块契约：module.create(rootEl, globalState) → { onShow?, onHide? }
 
-import * as home from './views/home.js';
-import * as lobby from './views/lobby.js';
-import * as game from './views/game.js';
-import * as result from './views/result.js';
-import * as rank from './views/rank.js';
+import * as home from './views/home.js?v=20261003d';
+import * as lobby from './views/lobby.js?v=20261003d';
+import * as game from './views/game.js?v=20261005qa';
+import * as result from './views/result.js?v=20261003d';
+import * as rank from './views/rank.js?v=20261003d';
 
 export const globalState = {
   currentPlayer: null,       // { id, name, team, score }
@@ -19,8 +19,8 @@ export const globalState = {
   gameReady: false
 };
 
-// 桂林学院默认中心：原小程序 GCJ-02 25.2354,110.2890 换算为 WGS-84（tools/gcj2wgs.js，与 coordtransform 参考实现一致）
-export const DEFAULT_CENTER = { latitude: 25.238236, longitude: 110.284419 };
+// 桂林学院雁山校区中心：小程序 GCJ-02 25.093668,110.277685 换算为 WGS-84。
+export const DEFAULT_CENTER = { latitude: 25.096525, longitude: 110.273130 };
 
 // 启动参数：?challenge=1&by=xx&team=cat 或 ?server=wss://..&passcode=1234
 export function parseQueryParams() {

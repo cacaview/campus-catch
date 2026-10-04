@@ -1,17 +1,18 @@
 // js/views/home.js — 首页（源 pages/index/index.js 727 行移植，Web 版裁剪：删 LAN/扫码/二维码，服务器模式走 wss）
-import { navigate, DEFAULT_CENTER, parseQueryParams } from '../main.js';
+import { navigate, DEFAULT_CENTER, parseQueryParams } from '../main.js?v=347ee3abc67c';
 import { getStorage, setStorage } from '../platform/storage.js';
 import { showToast, showModal, showLoading, hideLoading, setClipboardData } from '../platform/ui.js';
-import { getLocation } from '../platform/geo.js';
-import { createMap } from '../lib/map.js';
+import { createMap } from '../lib/map.js?v=mapblend-20261003a';
 import { achievementManager } from '../utils/achievement.js';
 import { shopManager } from '../utils/shop.js';
-import GameArea from '../utils/game-area.js';
+import GameArea from '../utils/game-area.js?v=mapfix-20261003a';
 import { getStablePlayerId } from '../utils/player-identity.js';
 import { Protocol } from '../utils/network/protocol.js';
 import { networkManager } from '../utils/network/network-manager.js';
 import { roomSession } from '../utils/network/room-session.js';
 import { DEFAULT_RELAY_URL } from '../config.js';
+
+const LEGACY_CAMPUS_CENTER = { latitude: 25.238236, longitude: 110.284419 };
 
 const GUIDE_SLIDES = [
   {
@@ -143,12 +144,19 @@ const HOME_HTML = `
       <label class="label">服务器地址 (wss:// 开头):</label>
       <input class="modal-input server-input" id="home-server-url" placeholder="例如 wss://192.168.1.100:8080" />
     </div>
-    <div class="info-sub">部署了 relay-server 后输入对应地址连接。房主创建房间后会把加入链接发给队友。</div>
+    <div class="input-item">
+      <label class="label" for="home-room-passcode">房间身份码（4 位）:</label>
+      <input class="modal-input server-input room-passcode-input" id="home-room-passcode" inputmode="numeric" autocomplete="one-time-code" maxlength="4" placeholder="输入房主提供的身份码" />
+    </div>
+    <div class="info-sub">输入房间身份码加入；也可以打开队友分享的邀请链接。房主创建房间后可复制身份码或邀请链接。</div>
     <div class="lan-actions">
       <button class="lan-btn host-btn" id="home-create-server-room">➕ 创建房间(做房主)</button>
     </div>
     <div class="room-created-info" id="home-join-link-box" hidden>
       <div class="info-title">✅ 房间已创建</div>
+      <div class="info-item">房间身份码</div>
+      <div class="room-passcode-value" id="home-room-passcode-value"></div>
+      <button class="copy-invite-btn mini-btn" id="home-passcode-copy">复制房间身份码</button>
       <div class="info-item">加入链接：</div>
       <div class="join-link-text" id="home-join-link-text"></div>
       <button class="copy-invite-btn mini-btn" id="home-join-link-copy">📋 复制加入链接</button>
@@ -263,15 +271,16 @@ export function create(rootEl, globalStateRef) {
   };
   const renderChecklist = () => {
     const identityReady = !!selectedTeam && nickname.length > 0;
+    const joiningServerRoom = netMode === 'SERVER' && !createdRoomPasscode;
     const checklist = [
       { label: '队伍', ok: !!selectedTeam },
       { label: '昵称', ok: nickname.length > 0 },
-      { label: '区域', ok: areaReady },
+      { label: joiningServerRoom ? '使用房主区域' : '区域', ok: areaReady || joiningServerRoom },
       { label: '时长', ok: true }
     ];
     $('home-checklist').innerHTML = checklist.map(c =>
       `<div class="check-item ${c.ok ? 'ok' : ''}"><span class="check-icon">${c.ok ? '✅' : '⬜'}</span><span>${c.label}</span></div>`).join('');
-    const ready = identityReady && areaReady;
+    const ready = identityReady && (areaReady || joiningServerRoom);
     $('home-start').classList.toggle('ready', ready);
     $('home-start').textContent = netMode === 'OFFLINE'
       ? '开始活动 (单机)'
@@ -348,7 +357,12 @@ export function create(rootEl, globalStateRef) {
     const cfg = getStorage('indexCfg') || {};
     if (cfg.selectedTeam === 'cat' || cfg.selectedTeam === 'mouse') selectedTeam = cfg.selectedTeam;
     if (Number.isFinite(Number(cfg.durationMinutes))) durationMinutes = Math.max(1, Math.min(120, Number(cfg.durationMinutes)));
-    if (Array.isArray(cfg.areaRawPoints) && cfg.areaRawPoints.length >= 3) rawPoints = cfg.areaRawPoints.slice();
+    if (Array.isArray(cfg.areaRawPoints) && cfg.areaRawPoints.length >= 3) {
+      const restored = cfg.areaRawPoints;
+      const migrated = GameArea.rebasePoints(restored, LEGACY_CAMPUS_CENTER, DEFAULT_CENTER);
+      rawPoints = migrated.slice();
+      if (migrated !== restored) saveConfig();
+    }
   };
 
   /* ---------- 引导 ---------- */
@@ -474,8 +488,8 @@ export function create(rootEl, globalStateRef) {
       networkManager.disconnect();
       resetRoomAttempt();
       showModal({
-        title: `${actionText}没有响应`,
-        content: '可能的原因：\n1. 服务器地址（wss://）填错\n2. relay-server 未运行\n3. 跨网络无法直连（需要公网可访问的地址）',
+        title: `${actionText}确认超时`,
+        content: '服务器连接已建立，但没有收到房间加入确认。请确认房间仍在等待、邀请链接和身份码正确，然后重试。',
         showCancel: false
       });
     }, 12000);
@@ -550,6 +564,7 @@ export function create(rootEl, globalStateRef) {
     globalStateRef.gameDurationSeconds = gameDurationSeconds;
 
     createdRoomPasscode = passcode;
+    $('home-room-passcode-value').textContent = passcode;
     const link = `${location.origin}${location.pathname}?server=${encodeURIComponent(serverUrl)}&passcode=${passcode}`;
     $('home-join-link-text').textContent = link;
     $('home-join-link-box').hidden = false;
@@ -582,14 +597,22 @@ export function create(rootEl, globalStateRef) {
     });
   };
 
+  const copyRoomPasscode = () => {
+    if (!createdRoomPasscode) return;
+    setClipboardData(createdRoomPasscode).then(() => {
+      showToast({ title: '房间身份码已复制', icon: 'success' });
+    });
+  };
+
   /* ---------- 开始游戏（源 startGame，LAN 分支删除） ---------- */
   const startGame = () => {
     const identityReady = !!selectedTeam && nickname.length > 0;
+    const joiningServerRoom = netMode === 'SERVER' && !createdRoomPasscode;
     if (!identityReady) {
       showToast({ title: '请选择队伍并输入昵称', icon: 'none' });
       return;
     }
-    if (!areaReady) {
+    if (!areaReady && !joiningServerRoom) {
       showToast({ title: '请先在地图上点击框选至少 3 个边界点', icon: 'none' });
       return;
     }
@@ -605,7 +628,7 @@ export function create(rootEl, globalStateRef) {
     };
     globalStateRef.netMode = netMode;
     globalStateRef.gameReady = true;
-    globalStateRef.gameArea = { type: 'polygon', points: areaPoints };
+    globalStateRef.gameArea = areaReady ? { type: 'polygon', points: areaPoints } : null;
     globalStateRef.gameDurationSeconds = durationMinutes * 60;
 
     if (netMode === 'OFFLINE') {
@@ -622,6 +645,7 @@ export function create(rootEl, globalStateRef) {
       }
       serverUrl = url;
 
+      // connectServer 只表示 WebSocket 已打开；入房结果由 joinSuccess / joinFail 处理。
       if (createdRoomPasscode) {
         // 房主复用已建房间：连接还活着就直接开局；
         // 已断开（如上一局结束 onHide 断连）则先重连房间再进局
@@ -630,7 +654,7 @@ export function create(rootEl, globalStateRef) {
           return;
         }
         showLoading({ title: '正在连接服务器...' });
-        startJoinWatchdog('连接服务器');
+        startJoinWatchdog('加入房间');
         ensureJoinEventsBound();
         joinFlowPending = true;
         roomSession.isHost = true;
@@ -642,48 +666,40 @@ export function create(rootEl, globalStateRef) {
           createdRoomPasscode,
           globalStateRef.gameArea,
           globalStateRef.gameDurationSeconds
-        )
-          .then(() => {
-            hideLoading();
-            clearJoinWatchdog();
-            // 进局导航统一由 joinSuccess 处理：这里再 navigate('game') 会叠加第二次
-            // 导航，触发路由同视图重建（onHide → networkManager.disconnect()），
-            // 房间刚建好就被静默断线
-          })
-          .catch(() => {
-            hideLoading();
-            joinFlowPending = false;
-            clearJoinWatchdog();
-            resetRoomAttempt();
-            showToast({ title: '无法连接服务器，已降级为单机试玩', icon: 'none' });
-            globalStateRef.netMode = 'OFFLINE';
-            setTimeout(() => navigate('game'), 1000);
-          });
+        ).catch(() => {
+          hideLoading();
+          joinFlowPending = false;
+          clearJoinWatchdog();
+          resetRoomAttempt();
+          showToast({ title: '无法连接服务器，已降级为单机试玩', icon: 'none' });
+          globalStateRef.netMode = 'OFFLINE';
+          setTimeout(() => navigate('game'), 1000);
+        });
         return;
       }
 
+      const passcode = $('home-room-passcode').value.trim();
+      if (!/^\d{4}$/.test(passcode)) {
+        showToast({ title: '请输入 4 位数字房间身份码', icon: 'none' });
+        return;
+      }
+      joinPasscode = passcode;
+
       showLoading({ title: '正在连接服务器...' });
-      startJoinWatchdog('连接服务器');
+      startJoinWatchdog('加入房间');
       ensureJoinEventsBound();
       joinFlowPending = true;
       roomSession.isHost = false;
       roomSession.myPlayer = globalStateRef.currentPlayer;
-      roomSession.passcode = joinPasscode || '8888';
+      roomSession.passcode = passcode;
 
       networkManager.connectServer(
         serverUrl,
         globalStateRef.currentPlayer,
-        joinPasscode || '8888',
+        passcode,
         globalStateRef.gameArea,
         globalStateRef.gameDurationSeconds
       )
-        .then(() => {
-          hideLoading();
-          clearJoinWatchdog();
-          // 进局导航统一由 joinSuccess 事件处理：connectServer 成功 + joinSuccess
-          // 各导航一次会造成同视图重建（onHide → networkManager.disconnect()），
-          // 加入者会带着假「服务器联机」状态全程离线
-        })
         .catch(() => {
           hideLoading();
           joinFlowPending = false;
@@ -703,6 +719,7 @@ export function create(rootEl, globalStateRef) {
       netMode = 'OFFLINE';
       createdRoomPasscode = '';
       joinPasscode = '';
+      $('home-room-passcode').value = '';
       $('home-join-link-box').hidden = true;
     }
     nickname = getStorage('lastNickname') || '';
@@ -735,25 +752,19 @@ export function create(rootEl, globalStateRef) {
       netMode = 'SERVER';
       if (q.passcode) {
         joinPasscode = q.passcode;
+        $('home-room-passcode').value = q.passcode;
         showToast({ title: `已带入房间身份码 ${q.passcode}`, icon: 'none' });
       }
       renderNetMode();
     }
 
-    // 地图定位中心
+    // 首页活动区域始终以校园底图配准中心为准；实时 GPS 定位在游戏中使用。
     if (!map) {
       map = createMap($('home-area-map'), {
-        center: [areaCenter.longitude, areaCenter.latitude],
-        zoom: 17
+        center: [areaCenter.longitude, areaCenter.latitude]
       });
       map.onTap(onAreaMapTap);
     }
-    getLocation({
-      success: loc => {
-        areaCenter = { latitude: loc.latitude, longitude: loc.longitude };
-        if (map) map.setCenter(loc.latitude, loc.longitude, 17);
-      }
-    });
     renderArea();
   };
 
@@ -781,6 +792,11 @@ export function create(rootEl, globalStateRef) {
     $('home-server-url').addEventListener('input', e => {
       serverUrlTouched = true;
       serverUrl = e.target.value.trim();
+    });
+    $('home-room-passcode').addEventListener('input', e => {
+      const passcode = e.target.value.replace(/\D/g, '').slice(0, 4);
+      if (e.target.value !== passcode) e.target.value = passcode;
+      joinPasscode = passcode;
     });
 
     $('home-area-undo').addEventListener('click', () => setAreaPoints(rawPoints.slice(0, -1)));
@@ -838,6 +854,7 @@ export function create(rootEl, globalStateRef) {
     $('mode-offline').addEventListener('click', () => { netMode = 'OFFLINE'; renderNetMode(); });
     $('mode-server').addEventListener('click', () => { netMode = 'SERVER'; renderNetMode(); });
     $('home-create-server-room').addEventListener('click', createServerRoom);
+    $('home-passcode-copy').addEventListener('click', copyRoomPasscode);
     $('home-join-link-copy').addEventListener('click', copyJoinLink);
 
     $('home-start').addEventListener('click', startGame);

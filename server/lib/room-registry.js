@@ -75,6 +75,14 @@ export class RoomRegistry {
       case 'ROOM_START_REQUEST':
         this.startRoom(state);
         return;
+      case 'GAME_END':
+        if (state.room?.phase === 'STARTED' && state.player?.id === state.room.hostId) {
+          this.broadcast(state.room, this.packet('GAME_END', {}, state.player.id), ws);
+        }
+        return;
+      case 'MAP_ITEM_PICKUP':
+        this.handleMapItemPickup(state, payload);
+        return;
       default:
         if (GAME_PACKET_TYPES.has(packet.type) && state.room) {
           const forwarded = {
@@ -86,6 +94,20 @@ export class RoomRegistry {
           this.broadcast(state.room, forwarded, ws);
         }
     }
+  }
+
+  handleMapItemPickup(state, payload) {
+    const room = state.room;
+    const itemId = Number(payload.itemId);
+    if (!room || !state.player || room.phase !== 'STARTED' || room.pickedMapItemIds.size >= 8 ||
+        !Number.isSafeInteger(itemId) || itemId < 2001) return;
+    if (room.pickedMapItemIds.has(itemId)) return;
+
+    room.pickedMapItemIds.add(itemId);
+    this.broadcast(room, this.packet('MAP_ITEM_PICKUP', {
+      itemId,
+      playerId: state.player.id
+    }, state.player.id));
   }
 
   joinRoom(state, payload) {
@@ -136,6 +158,7 @@ export class RoomRegistry {
         roomId: `ROOM_${passcode}`,
         members: new Map(),
         knownPlayerIds: new Set(),
+        pickedMapItemIds: new Set(),
         hostId: playerId,
         phase: 'WAITING',
         startAt: null,
@@ -179,7 +202,8 @@ export class RoomRegistry {
       phase: room.phase,
       startAt: room.startAt,
       gameArea: room.gameArea,
-      gameDurationSeconds: room.gameDurationSeconds
+      gameDurationSeconds: room.gameDurationSeconds,
+      pickedMapItemIds: [...room.pickedMapItemIds]
     });
     this.broadcast(room, this.packet('PLAYER_JOINED', { player }, playerId), state.ws);
   }

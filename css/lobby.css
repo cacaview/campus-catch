@@ -54,6 +54,17 @@
   gap: 8px;
   margin-top: 14px;
 }
+#view-lobby .room-code-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#view-lobby .room-code-value {
+  flex: 1;
+  color: #6fd8ff;
+  font-size: 20px;
+  letter-spacing: 0.24em;
+}
 #view-lobby .invite-label { color: #cfd3f5; font-size: 12px; }
 #view-lobby .invite-link {
   overflow-wrap: anywhere;

@@ -3,6 +3,8 @@
  * 负责在地图上动态刷新：能量奶酪 🧀、猫薄荷 🌿、控制陷阱 🪤、草丛安全区 🌫️
  */
 
+import GameArea from './game-area.js';
+
 export const ITEM_TYPES = {
   CHEESE: 'CHEESE',       // 🧀 能量奶酪：鼠拾取 +10 分并加速 5 秒
   CATNIP: 'CATNIP',       // 🌿 猫薄荷：猫拾取全图透视老鼠 5 秒
@@ -17,26 +19,49 @@ class MapItems {
   }
 
   /**
-   * 在地图中心点周边随机刷新 N 个道具/陷阱
+   * Generate items inside the selected polygon. A seed makes every client in
+   * the same room derive the same positions and numeric ids.
    */
-  spawnItems(centerPos, count = 6) {
+  spawnItems(areaOrCenter, count = 6, seed = null) {
     this.items = [];
     const types = [ITEM_TYPES.CHEESE, ITEM_TYPES.CHEESE, ITEM_TYPES.CATNIP, ITEM_TYPES.TRAP, ITEM_TYPES.TRAP, ITEM_TYPES.BUSH];
+    const area = GameArea.isValidArea(areaOrCenter) ? areaOrCenter : null;
+    const centerPos = area
+      ? GameArea.center(area)
+      : areaOrCenter && Number.isFinite(Number(areaOrCenter.latitude)) && Number.isFinite(Number(areaOrCenter.longitude))
+        ? { latitude: Number(areaOrCenter.latitude), longitude: Number(areaOrCenter.longitude) }
+        : null;
+    if (!centerPos) return this.items;
 
-    for (let i = 0; i < count; i++) {
+    const itemCount = Math.max(0, Math.floor(Number(count) || 0));
+    const random = seed == null ? Math.random : createSeededRandom(seed);
+    const bounds = area ? getBounds(area) : null;
+    const seedHash = seed == null ? null : hashSeed(seed);
+    const firstId = seedHash == null
+      ? this.itemIdCounter
+      : 2001 + (seedHash % 1_000_000_000) * Math.max(itemCount, 1);
+
+    for (let i = 0; i < itemCount; i++) {
       const type = types[i % types.length];
-      const offsetLat = (Math.random() - 0.5) * 0.003; // ~150-200m
-      const offsetLng = (Math.random() - 0.5) * 0.003;
+      const position = area
+        ? randomPointInArea(area, bounds, random, Math.max(100, itemCount * 1000))
+        : {
+            latitude: centerPos.latitude + (random() - 0.5) * 0.003,
+            longitude: centerPos.longitude + (random() - 0.5) * 0.003
+          };
+      if (!position) break;
 
       this.items.push({
-        id: Number(this.itemIdCounter++), // 必须是 Number 类型！
+        id: Number(firstId + i), // Marker 与 relay 都沿用数字 ID。
         type: type,
-        latitude: centerPos.latitude + offsetLat,
-        longitude: centerPos.longitude + offsetLng,
+        latitude: position.latitude,
+        longitude: position.longitude,
         icon: this.getIconForType(type),
         name: this.getNameForType(type)
       });
     }
+
+    if (seed == null) this.itemIdCounter += this.items.length;
 
     return this.items;
   }
@@ -62,28 +87,32 @@ class MapItems {
   }
 
   /**
-   * 检查玩家坐标是否触碰到地图道具 (距离 < 10 米)
+   * Find an eligible nearby item without removing it. Online clients wait for
+   * the relay's pickup confirmation before changing shared state.
    */
-  checkItemPickup(playerPos, isCat) {
+  findItemPickup(playerPos, isCat) {
     const PICKUP_RADIUS = 0.00015; // 约 10-15 米
-    let pickedItem = null;
-
-    this.items = this.items.filter(item => {
+    return this.items.find(item => {
       // 阵营门控：奶酪只有鼠能拿、猫薄荷只有猫能拿；陷阱/草丛双方通用
       const usable = item.type === ITEM_TYPES.CATNIP ? !!isCat
                    : item.type === ITEM_TYPES.CHEESE ? !isCat
                    : true;
       const dLat = Math.abs(item.latitude - playerPos.latitude);
       const dLng = Math.abs(item.longitude - playerPos.longitude);
-
-      if (usable && dLat < PICKUP_RADIUS && dLng < PICKUP_RADIUS && !pickedItem) {
-        pickedItem = item;
-        return false; // 移除已拾取的道具
-      }
-      return true;
+      return usable && dLat < PICKUP_RADIUS && dLng < PICKUP_RADIUS;
     });
+  }
 
-    return pickedItem;
+  removeItemById(id) {
+    const index = this.items.findIndex(item => String(item.id) === String(id));
+    if (index < 0) return null;
+    return this.items.splice(index, 1)[0];
+  }
+
+  /** Check and remove a nearby item (offline mode). */
+  checkItemPickup(playerPos, isCat) {
+    const item = this.findItemPickup(playerPos, isCat);
+    return item ? this.removeItemById(item.id) : null;
   }
 
   /**
@@ -99,6 +128,48 @@ class MapItems {
       name: this.getNameForType(item.type)
     }));
   }
+}
+
+function getBounds(area) {
+  const latitudes = area.points.map(point => Number(point.latitude));
+  const longitudes = area.points.map(point => Number(point.longitude));
+  return {
+    minLat: Math.min(...latitudes),
+    maxLat: Math.max(...latitudes),
+    minLng: Math.min(...longitudes),
+    maxLng: Math.max(...longitudes)
+  };
+}
+
+function randomPointInArea(area, bounds, random, maxAttempts) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const point = {
+      latitude: bounds.minLat + random() * (bounds.maxLat - bounds.minLat),
+      longitude: bounds.minLng + random() * (bounds.maxLng - bounds.minLng)
+    };
+    if (GameArea.contains(area, point)) return point;
+  }
+  return null;
+}
+
+function hashSeed(seed) {
+  let hash = 2166136261;
+  for (const character of String(seed)) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function createSeededRandom(seed) {
+  let state = hashSeed(seed) || 1;
+  return () => {
+    state = (state + 0x6D2B79F5) | 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 const MapItemsManager = new MapItems();

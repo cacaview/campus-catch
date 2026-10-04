@@ -16,6 +16,7 @@ export class RoomSession {
     this.hostIp = '';
     this.gameArea = null;
     this.gameDurationSeconds = 600;
+    this.pickedMapItemIds = [];
   }
 
   /**
@@ -32,6 +33,7 @@ export class RoomSession {
     this.members = [hostPlayer];
     this.gameArea = gameArea;
     this.gameDurationSeconds = gameDurationSeconds;
+    this.pickedMapItemIds = [];
     this.maxCapacity = Infinity; // ♾️ 无人数上限大乱斗
     console.log(`[RoomSession] Created Unlimited Room ${this.roomId} with passcode ${this.passcode}`);
     return {
@@ -84,6 +86,11 @@ export class RoomSession {
     }
     if (payload.gameArea) this.gameArea = payload.gameArea;
     if (Number.isFinite(payload.gameDurationSeconds)) this.gameDurationSeconds = payload.gameDurationSeconds;
+    if (Array.isArray(payload.pickedMapItemIds)) {
+      this.pickedMapItemIds = payload.pickedMapItemIds
+        .map(Number)
+        .filter(id => Number.isSafeInteger(id) && id >= 2001);
+    }
   }
 
   applyHostChange(payload = {}) {
@@ -129,6 +136,7 @@ export class RoomSession {
     this.hostIp = '';
     this.gameArea = null;
     this.gameDurationSeconds = 600;
+    this.pickedMapItemIds = [];
   }
 }
 

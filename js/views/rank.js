@@ -1,6 +1,6 @@
 // js/views/rank.js — 排行榜视图（源 pages/rank/rank.js 135 行逻辑全保留）
 // wx→Web：getStorageSync→getStorage，setData→状态+渲染，wx:for/wx:if→JS 渲染
-import { navigate } from '../main.js';
+import { navigate } from '../main.js?v=347ee3abc67c';
 import { getStorage } from '../platform/storage.js';
 
 // 时间范围：本周榜 / 本月榜 / 总榜

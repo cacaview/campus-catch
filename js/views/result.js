@@ -2,10 +2,10 @@
 // wx→Web：canvasToTempFilePath→canvas.toBlob，saveImageToPhotosAlbum→a[download]，
 // onShareAppMessage→复制链接（?challenge=1&by=&team=），wx:if/wx:for→JS 渲染，
 // map 组件→MapLibre 封装，getStorageSync/setStorageSync→platform/storage
-import { navigate } from '../main.js';
+import { navigate } from '../main.js?v=347ee3abc67c';
 import { showToast, setClipboardData } from '../platform/ui.js';
 import { getStorage, setStorage } from '../platform/storage.js';
-import { createMap } from '../lib/map.js';
+import { createMap } from '../lib/map.js?v=mapblend-20261003a';
 import GameArea from '../utils/game-area.js';
 import { getStablePlayerId } from '../utils/player-identity.js';
 import { networkManager } from '../utils/network/network-manager.js';

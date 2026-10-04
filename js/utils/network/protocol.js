@@ -9,6 +9,7 @@ export const MSG_TYPES = {
   JOIN_ACK: 'JOIN_ACK',           // 加入确认 (成功/失败)
   PLAYER_JOINED: 'PLAYER_JOINED',
   PLAYER_LEFT: 'PLAYER_LEFT',
+  MAP_ITEM_PICKUP: 'MAP_ITEM_PICKUP', // 房间内单次确认并广播道具拾取
   ROOM_START_REQUEST: 'ROOM_START_REQUEST',
   ROOM_STARTED: 'ROOM_STARTED',
   ROOM_START_ERROR: 'ROOM_START_ERROR',
@@ -40,6 +41,7 @@ export const MSG_TYPES = {
   // 房主控制 (Host -> 全员)
   GAME_PAUSE: 'GAME_PAUSE',       // 暂停/继续 { paused }
   GAME_EXTEND: 'GAME_EXTEND',     // 延长局时 { seconds }
+  GAME_END: 'GAME_END',           // 房主同步结算
   PLAYER_KICK: 'PLAYER_KICK',     // 踢出玩家 { playerId, name }
 
   // 重连

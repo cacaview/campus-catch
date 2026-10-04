@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -9,6 +10,23 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = p => readFileSync(join(root, p), 'utf8');
+
+test('regression: 暂停面板提供仅房主可用的继续按钮', () => {
+  const src = read('js/views/game.js');
+  assert.match(src, /id="game-resume" hidden>继续活动<\/button>/);
+  assert.match(src, /\$\('game-resume'\)\.hidden = !s\.isHost/);
+  assert.match(src, /\$\('game-resume'\)\.addEventListener\('click', \(\) => \{\s*if \(s\.isHost\) resumeGame\(\)/);
+  assert.doesNotMatch(src, /点击顶部 👑 可继续活动/);
+});
+
+test('regression: 房主结束活动会同步结算，接收端不会重复广播', () => {
+  const src = read('js/views/game.js');
+  assert.match(src, /netHandlers\.gameEnd = \(\) => endGame\(true\)/);
+  assert.match(src, /const endGame = \(fromNet = false\) => \{\s*if \(s\.gamePhase === 'END'\) return/);
+  assert.match(src, /if \(!fromNet && s\.isHost && s\.netMode !== 'OFFLINE'\) \{\s*networkManager\.send\(MSG_TYPES\.GAME_END, \{\}\)/);
+  assert.match(src, /networkManager\.on\(MSG_TYPES\.GAME_END, netHandlers\.gameEnd\)/);
+  assert.match(src, /networkManager\.off\(MSG_TYPES\.GAME_END, netHandlers\.gameEnd\)/);
+});
 
 test('regression: base.css 的 [hidden] 兜底规则存在', () => {
   // BUG: 组件 CSS 写死 display:flex 会覆盖 UA 的 [hidden] 规则，导致
@@ -25,24 +43,51 @@ test('regression: MapView.create 必须传入 style，否则地图永不渲染',
   assert.match(ctor[0], /style:\s*\{\s*version:\s*8/);
 });
 
-test('regression: 默认底图不得使用已强制 API key 的 CARTO 瓦片', () => {
-  // 外部服务变化: basemaps.cartocdn.com 免 key 瓦片自 2026-09 返回 "API KEY REQUIRED"
-  // 占位图（HTTP 仍 200，单看状态码发现不了）
+test('regression: 校园图片为默认底图且不依赖 CARTO 或 OSM 瓦片', () => {
   const src = read('js/lib/map.js');
   assert.doesNotMatch(src, /basemaps\.cartocdn\.com/);
-  assert.match(src, /tile\.openstreetmap\.org/);
+  assert.doesNotMatch(src, /tile\.openstreetmap\.org/);
+  assert.match(src, /assets\/campus-map\.jpg/);
 });
 
-test('regression: 默认底图必须是卫星图（OSM 街道图国内不可达）', () => {
-  // BUG: OSM 街道瓦片在国内网络基本无法加载，默认底图改为 Esri 卫星瓦片
-  //（免 key、WGS-84、国内可直连），OSM 降为可切换样式
+test('regression: 入口和视图循环引用使用同一版本的 main 模块', () => {
+  const index = read('index.html');
+  const entry = index.match(/src="js\/main\.js\?v=([a-f0-9]{12})"/);
+  assert.ok(entry, 'main 模块入口缺少内容版本参数');
+  const main = read('js/main.js');
+  assert.equal(entry[1], createHash('sha256').update(main).digest('hex').slice(0, 12));
+  for (const view of ['home', 'lobby', 'game', 'result', 'rank']) {
+    assert.match(read(`js/views/${view}.js`), new RegExp(`from ['"]\\.\\./main\\.js\\?v=${entry[1]}['"]`));
+    assert.match(main, new RegExp(`from ['"]\\.\\/views\\/${view}\\.js\\?v=${view === 'game' ? '20261005qa' : '20261003d'}['"]`));
+  }
+});
+
+test('regression: 默认校园图叠在卫星底图上，并可切换为纯卫星图', () => {
   const src = read('js/lib/map.js');
-  assert.match(src, /_satelliteCache = true/);           // 地图默认卫星图
-  assert.match(src, /_handleBasemapError/);              // 街道图失败自动回退
-  assert.match(src, /onBasemapFallback/);                // 回退通知视图层提示
+  assert.match(src, /_satelliteCache = false/);          // 默认校园图叠加模式
+  assert.match(src, /setLayoutProperty\('satellite-layer', 'visibility', 'visible'\)/);
+  assert.match(src, /'campus-map-layer'.*visibility/);   // 纯卫星模式隐藏校园图
   const game = read('js/views/game.js');
-  assert.match(game, /satellite: true,/);                // 游戏视图初始状态与地图一致
-  assert.match(game, /s\.satellite = true;/);
+  assert.match(game, /satellite: false,/);               // 游戏视图初始状态与地图一致
+  assert.match(game, /已切换校园图/);
+});
+
+test('regression: 首页框选地图固定在校园底图中心，不被设备 GPS 移出图片范围', () => {
+  const home = read('js/views/home.js');
+  const onShow = home.match(/const onShow = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(onShow, '未找到 home.onShow');
+  assert.match(home, /let areaCenter = \{ \.\.\.DEFAULT_CENTER \}/);
+  assert.match(onShow[1], /center:\s*\[areaCenter\.longitude, areaCenter\.latitude\]/);
+  assert.doesNotMatch(onShow[1], /getLocation\(|map\.setCenter\(/);
+});
+
+test('regression: 首页载入时迁移旧校区中心保存的活动区域', () => {
+  const home = read('js/views/home.js');
+  assert.match(home, /LEGACY_CAMPUS_CENTER\s*=\s*\{\s*latitude:\s*25\.238236,\s*longitude:\s*110\.284419\s*\}/);
+  assert.match(home, /from '\.\.\/utils\/game-area\.js\?v=mapfix-20261003a'/);
+  assert.match(home, /from '\.\.\/lib\/map\.js\?v=mapblend-20261003a'/);
+  assert.match(home, /GameArea\.rebasePoints\(restored,\s*LEGACY_CAMPUS_CENTER,\s*DEFAULT_CENTER/);
+  assert.match(home, /if\s*\(migrated\s*!==\s*restored\)\s*saveConfig\(\)/);
 });
 
 test('regression: 加入者路径不得在 connectServer.then 里导航进局', () => {

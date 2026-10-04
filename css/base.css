@@ -104,7 +104,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .anim-slide-up { animation: slideUp 0.5s ease-out; }
 
 /* 地图 DOM 标记（MapLibre Marker 元素，home 框选 / game 玩家 / result 回放共用） */
-.map-marker { position: relative; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.map-marker { transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; pointer-events: none; }
 .map-marker .mm-icon {
   font-size: 18px; line-height: 1;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));

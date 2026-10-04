@@ -108,6 +108,7 @@
 #view-game .pause-icon { font-size: 44px; }
 #view-game .pause-title { color: #ffd700; font-size: 18px; font-weight: bold; }
 #view-game .pause-sub { color: #9aa0c3; font-size: 12px; }
+#view-game #game-resume { margin-top: 12px; min-height: 44px; }
 
 /* 倒计时遮罩 */
 #view-game .countdown-overlay {

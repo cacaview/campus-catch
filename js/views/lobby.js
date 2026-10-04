@@ -1,5 +1,5 @@
 // js/views/lobby.js — 单机 AI 大厅与服务器在线等待大厅
-import { navigate } from '../main.js';
+import { navigate } from '../main.js?v=347ee3abc67c';
 import { showToast, showModal, setClipboardData } from '../platform/ui.js';
 import { networkManager } from '../utils/network/network-manager.js';
 import { roomSession } from '../utils/network/room-session.js';
@@ -15,6 +15,11 @@ const LOBBY_HTML = `
       <div class="room-mode" id="lobby-mode">🤖 单机房间</div>
       <div class="room-meta" id="lobby-meta"></div>
       <div class="online-invite" id="lobby-online-invite" hidden>
+        <div class="room-code-row">
+          <span class="invite-label">房间身份码</span>
+          <strong class="room-code-value" id="lobby-room-passcode"></strong>
+          <button class="btn btn-ghost" id="lobby-copy-passcode">复制身份码</button>
+        </div>
         <span class="invite-label">邀请链接</span>
         <span class="invite-link" id="lobby-invite-link"></span>
         <button class="btn btn-ghost" id="lobby-copy-link">📋 复制邀请链接</button>
@@ -101,7 +106,8 @@ export function create(rootEl, globalStateRef) {
     const phase = roomSession.phase;
     const members = roomSession.members || [];
     const inviteUrl = `${location.origin}${location.pathname}?server=${encodeURIComponent(networkManager.targetUrl)}&passcode=${encodeURIComponent(roomSession.passcode)}`;
-    $('lobby-mode').textContent = `🌐 在线房间 · 身份码 ${roomSession.passcode || '----'}`;
+    $('lobby-mode').textContent = '🌐 在线房间';
+    $('lobby-room-passcode').textContent = roomSession.passcode || '----';
     $('lobby-meta').textContent = `⏱ 活动时长：${Math.round((roomSession.gameDurationSeconds || 600) / 60)} 分钟`;
     $('lobby-online-invite').hidden = false;
     $('lobby-invite-link').textContent = inviteUrl;
@@ -232,6 +238,13 @@ export function create(rootEl, globalStateRef) {
     });
   };
 
+  const copyRoomPasscode = () => {
+    if (!roomSession.passcode) return;
+    setClipboardData(roomSession.passcode).then(() => {
+      showToast({ title: '房间身份码已复制', icon: 'success' });
+    });
+  };
+
   const editConfig = () => navigate('home');
   const dissolveRoom = async () => {
     const res = await showModal({ title: '解散房间', content: '确定解散当前房间并返回首页吗？' });
@@ -247,6 +260,7 @@ export function create(rootEl, globalStateRef) {
     else startFromLobby();
   });
   $('lobby-copy-link').addEventListener('click', copyInviteLink);
+  $('lobby-copy-passcode').addEventListener('click', copyRoomPasscode);
   $('lobby-edit').addEventListener('click', editConfig);
   $('lobby-dissolve').addEventListener('click', dissolveRoom);
 

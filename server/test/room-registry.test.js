@@ -41,6 +41,24 @@ function joined(registry, id, passcode = '1234', team = 'cat', createIfMissingRo
   return socket;
 }
 
+test('onlyStartedRoomHostCanSynchronizeSettlement', () => {
+  const registry = new RoomRegistry();
+  const host = joined(registry, 'host');
+  const guest = joined(registry, 'guest');
+  const other = joined(registry, 'other', '9999');
+  guest.clear();
+  registry.handlePacket(host, packet('GAME_END'));
+  assert.equal(guest.packets('GAME_END').length, 0);
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+  host.clear(); guest.clear(); other.clear();
+  registry.handlePacket(guest, packet('GAME_END', {}, 'host'));
+  assert.equal(host.packets('GAME_END').length, 0);
+  registry.handlePacket(host, packet('GAME_END'));
+  assert.equal(guest.packets('GAME_END').length, 1);
+  assert.equal(guest.packets('GAME_END')[0].senderId, 'host');
+  assert.equal(other.packets('GAME_END').length, 0);
+});
+
 test('routesChatOnlyWithinJoinedRoom', () => {
   const registry = new RoomRegistry();
   const sender = joined(registry, 'sender');
@@ -87,7 +105,7 @@ test('forwardsExistingGameplayPacketsWithinRoom', () => {
   const otherRoom = joined(registry, 'other-room', '9999');
   const gameplayTypes = [
     'SYNC_ROOM_STATE', 'PLAYER_MOVE', 'USE_SKILL', 'CATCH_EVENT', 'GAME_PAUSE',
-    'GAME_EXTEND', 'PLAYER_KICK', 'RECONNECT', 'RECONNECT_ACK', 'MAP_ITEM_PICKUP'
+    'GAME_EXTEND', 'PLAYER_KICK', 'RECONNECT', 'RECONNECT_ACK'
   ];
 
   for (const type of gameplayTypes) {
@@ -98,6 +116,27 @@ test('forwardsExistingGameplayPacketsWithinRoom', () => {
     assert.deepEqual(sameRoom.packets(type)[0]?.payload, payload, `${type} reaches same room`);
     assert.equal(otherRoom.packets(type).length, 0, `${type} stays in room`);
   }
+});
+
+test('broadcasts a map-item pickup once to the started room', () => {
+  const registry = new RoomRegistry();
+  const picker = joined(registry, 'picker');
+  const teammate = joined(registry, 'teammate', '1234', 'mouse');
+  const otherRoom = joined(registry, 'other-room', '9999');
+  registry.handlePacket(picker, packet('ROOM_START_REQUEST'));
+  for (const socket of [picker, teammate, otherRoom]) socket.clear();
+
+  registry.handlePacket(picker, packet('MAP_ITEM_PICKUP', { itemId: 2001 }, 'spoofed-id'));
+  registry.handlePacket(picker, packet('MAP_ITEM_PICKUP', { itemId: 2001 }, 'spoofed-id'));
+
+  assert.equal(picker.packets('MAP_ITEM_PICKUP').length, 1);
+  assert.equal(teammate.packets('MAP_ITEM_PICKUP').length, 1);
+  assert.equal(otherRoom.packets('MAP_ITEM_PICKUP').length, 0);
+  assert.deepEqual(teammate.packets('MAP_ITEM_PICKUP')[0].payload, {
+    itemId: 2001,
+    playerId: 'picker'
+  });
+  assert.equal(teammate.packets('MAP_ITEM_PICKUP')[0].senderId, 'picker');
 });
 
 test('rejectsWrongTeamForVoiceChannel', () => {

@@ -1,32 +1,58 @@
 // MapLibre 封装：全应用唯一 MapLibre 使用点（home 框选 / game 主地图 / result 回放）
 // 注意：addSource/addLayer 必须等 map 'load' 事件，未就绪的图层操作走缓存，load 后统一应用
-// 底图瓦片（两个都免 key、WGS-84 与 GPS 对齐）：
-//   默认卫星图 Esri World_Imagery —— 国内网络可直连；
-//   街道图 OSM —— 作为可切换样式，国内可能不可达，连续加载失败自动回退卫星图
-//   （CARTO 免 key 瓦片 2026-09 起强制 API key，返回 "API KEY REQUIRED" 占位图，已弃用）
-const BASE_TILE = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+// 校园图片范围沿用小程序地图图层边界（GCJ-02），转换为 WGS-84 后用于 MapLibre。
+// 默认在 Esri 卫星底图上叠加本地校园图；游戏中可切换到纯卫星图。
+import { gcj02ToWgs84, miniProgramGroundOverlayToMapLibre } from '../utils/map-coordinates.js';
 const SAT_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const CAMPUS_MAP_URL = new URL('../../assets/campus-map.jpg', import.meta.url).href;
+const CAMPUS_GROUND_OVERLAY = {
+  src: CAMPUS_MAP_URL,
+  opacity: 0.8,
+  bounds: {
+    southwest: { longitude: 110.273850, latitude: 25.088910 },
+    northeast: { longitude: 110.281229, latitude: 25.098995 }
+  }
+};
+// 小程序 mapInfo.boundary uses GCJ-02. MapLibre and its raster tiles use WGS-84.
+const CAMPUS_MAP_BOUNDARY = {
+  southwest: { longitude: 110.272618, latitude: 25.088083 },
+  northeast: { longitude: 110.281911, latitude: 25.099580 }
+};
+const CAMPUS_MAP_MAX_BOUNDS = [
+  gcj02ToWgs84(CAMPUS_MAP_BOUNDARY.southwest),
+  gcj02ToWgs84(CAMPUS_MAP_BOUNDARY.northeast)
+].map(({ longitude, latitude }) => [
+  Number(longitude.toFixed(6)), Number(latitude.toFixed(6))
+]);
 const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
 
 class MapView {
-  constructor(map) {
+  constructor(map, groundOverlay) {
     this.map = map;
+    this.groundOverlay = groundOverlay;
     this.markers = new Map(); // id → maplibregl.Marker
     this.tapCb = null;
     this.userMarker = null;
     this._ready = false;
     this._polygonCache = null;
     this._linesCache = null;
-    this._satelliteCache = true; // 默认卫星图：street 图（OSM）在国内网络常不可达
-    this.onBasemapFallback = null; // 街道图加载失败自动回退时通知视图层提示用户
+    this._satelliteCache = false; // 默认显示校园图叠加；卫星图作为底图
   }
 
-  static create(container, { center = [110.284419, 25.238236], zoom = 16 } = {}) {
+  static create(container, {
+    center = [110.273130, 25.096525],
+    zoom = 16.1,
+    minZoom = 16,
+    maxBounds = CAMPUS_MAP_MAX_BOUNDS,
+    groundOverlay = CAMPUS_GROUND_OVERLAY
+  } = {}) {
     const ml = window.maplibregl;
     const map = new ml.Map({
       container,
       center,
       zoom,
+      minZoom,
+      maxBounds,
       // 必须提供 style：MapLibre 对无 style 的地图不会调度任何渲染帧，
       // load 事件永不触发，后续 addSource/addLayer（含瓦片底图）永远挂不上
       style: { version: 8, sources: {}, layers: [] },
@@ -36,7 +62,7 @@ class MapView {
     });
     map.addControl(new ml.AttributionControl({ compact: true }), 'bottom-right');
 
-    const view = new MapView(map);
+    const view = new MapView(map, groundOverlay);
     view._setupBadgeClamp();
     const finish = () => {
       view._setupLayers();
@@ -56,26 +82,30 @@ class MapView {
 
   _setupLayers() {
     const map = this.map;
-    map.addSource('basemap', {
-      type: 'raster',
-      tiles: [BASE_TILE],
-      tileSize: 256,
-      attribution: '©OpenStreetMap contributors'
+    const campusOverlay = miniProgramGroundOverlayToMapLibre(this.groundOverlay);
+    map.addLayer({
+      id: 'campus-backdrop-layer',
+      type: 'background',
+      paint: { 'background-color': '#f2f1ed' }
     });
-    map.addLayer({ id: 'basemap-layer', type: 'raster', source: 'basemap' });
     map.addSource('satellite', {
       type: 'raster',
       tiles: [SAT_TILE],
       tileSize: 256,
       attribution: 'Esri, Maxar'
     });
-    map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite' }, 'basemap-layer');
-    // 默认显示卫星图，街道图（OSM）隐藏为可切换样式；隐藏图层不请求瓦片
-    map.getLayer('basemap-layer').setLayoutProperty('visibility', 'none');
-    // 街道图瓦片在部分网络（国内）不可达：连续失败自动回退卫星图
-    this._basemapErrors = 0;
-    this._basemapFallbackFired = false;
-    map.on('error', e => this._handleBasemapError(e));
+    map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite' });
+    map.addSource('campus-map', {
+      type: 'image',
+      url: campusOverlay.url,
+      coordinates: campusOverlay.coordinates
+    });
+    map.addLayer({
+      id: 'campus-map-layer',
+      type: 'raster',
+      source: 'campus-map',
+      paint: { 'raster-fade-duration': 0, 'raster-opacity': campusOverlay.opacity }
+    });
 
     map.addSource('polygon-src', { type: 'geojson', data: EMPTY_GJ });
     map.addLayer({
@@ -227,20 +257,11 @@ class MapView {
     if (this._ready) this._applySatellite(this._satelliteCache);
   }
 
-  _handleBasemapError(e) {
-    if (this._basemapFallbackFired) return;
-    const src = e && (e.sourceId || (e.source && e.source.id));
-    if (src !== 'basemap' || this._satelliteCache) return; // 卫星图状态下街道层不可见、不加载
-    this._basemapErrors++;
-    if (this._basemapErrors < 3) return; // 容忍偶发失败
-    this._basemapFallbackFired = true;
-    this.setSatellite(true);
-    if (typeof this.onBasemapFallback === 'function') this.onBasemapFallback();
-  }
-
   _applySatellite(on) {
-    this.map.setLayoutProperty('satellite-layer', 'visibility', on ? 'visible' : 'none');
-    this.map.setLayoutProperty('basemap-layer', 'visibility', on ? 'none' : 'visible');
+    // Keep satellite imagery as the geographic base in both modes. Campus mode
+    // overlays the school illustration; satellite mode shows the imagery alone.
+    this.map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
+    this.map.setLayoutProperty('campus-map-layer', 'visibility', on ? 'none' : 'visible');
   }
 
   fitBounds(points, pad = 40) {
