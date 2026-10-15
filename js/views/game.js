@@ -16,6 +16,7 @@ import { achievementManager } from '../utils/achievement.js';
 import { shopManager } from '../utils/shop.js';
 import GameArea from '../utils/game-area.js';
 import AIPlayerController from '../utils/ai-player.js';
+import { getStorage } from '../platform/storage.js';
 
 const ITEM_COLORS = {
   [ITEM_TYPES.CHEESE]: '#ffa500',
@@ -23,6 +24,9 @@ const ITEM_COLORS = {
   [ITEM_TYPES.TRAP]: '#e84118',
   [ITEM_TYPES.BUSH]: '#718093'
 };
+
+// 抓捕判定方式：instant = 进入范围立即判定（源逻辑）；sustained = 连续保持范围 3 秒自动抓捕（默认，与联机中继一致）
+const CATCH_PROXIMITY_MS = 3000;
 
 const GAME_HTML = `
   <div id="game-map"></div>
@@ -630,7 +634,24 @@ export function create(rootEl, globalStateRef) {
     };
 
     netHandlers.catchEvent = payload => {
-      if (payload) onCatchEvent(payload.catName, payload.mouseName, payload.success);
+      if (!payload) return;
+      const myId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'me';
+      const isMyCat = String(payload.catId) === String(myId);
+      const isMyMouse = String(payload.mouseId) === String(myId);
+      if (payload.blocked) {
+        if (isMyMouse) {
+          s.isShieldActive = false;
+          addSystemMessage('🛡️ [金钟罩] 护盾为你抵扣了一次抓捕！');
+        } else {
+          addSystemMessage(`🛡️ ${payload.mouseName || payload.mouseId} 的金钟罩抵扣了一次抓捕！`);
+        }
+        soundVibration.vibrateShort('heavy');
+        return;
+      }
+      if (payload.success && isMyCat) s.myScore += 10;
+      if (!payload.success && isMyMouse) s.myScore += 5;
+      if (isMyCat || isMyMouse) renderHud();
+      onCatchEvent(payload.catName, payload.mouseName, payload.success, payload);
     };
 
     netHandlers.chatMessage = payload => {
@@ -929,6 +950,33 @@ export function create(rootEl, globalStateRef) {
     renderHud();
   };
 
+  // 抓捕结算公共逻辑：防连点冷却 → 金钟罩吸收 → 结果（猫必成 / 鼠 30% 逃脱）
+  const resolveOfflineCatch = (ai, nowTs) => {
+    if ((catchCdUntil || 0) > nowTs) return;
+    if (ai._lastCatchAt && (nowTs - ai._lastCatchAt < 10000)) return;
+    catchCdUntil = nowTs + 3000;
+    ai._lastCatchAt = nowTs;
+    if (s.isShieldActive) {
+      s.isShieldActive = false;
+      addSystemMessage('🛡️ [金钟罩] 护盾为你抵扣了一次抓捕！');
+      soundVibration.vibrateShort('heavy');
+      return;
+    }
+    const isCat = s.myTeam === 'cat';
+    const catName = isCat ? s.myName : ai.name;
+    const mouseName = isCat ? ai.name : s.myName;
+    const success = isCat || Math.random() < 0.3;
+
+    if (success) {
+      soundVibration.playSound('catch_success');
+      if (isCat) { s.myScore += 10; renderHud(); }
+    } else {
+      soundVibration.playSound('escape_success');
+      if (!isCat) { s.myScore += 5; renderHud(); }
+    }
+    onCatchEvent(catName, mouseName, success);
+  };
+
   const gameTick = () => {
     if (s.isOutsideArea || s.isPaused) return;
     let changed = false;
@@ -965,50 +1013,47 @@ export function create(rootEl, globalStateRef) {
         if (move.chat) addChatMessage(ai.name, move.chat);
         changed = true;
 
-        // 真实 GPS 物理接近抓捕检测（源 L648-695 原样：同阵营不触发）
+        // 真实 GPS 物理接近抓捕检测（同阵营不触发；10 米范围内开始判定，方式可切换：即时 / 3 秒持续）
         const pCat = ai.team === 'cat';
         if (pCat === (s.myTeam === 'cat')) return;
         const dLat = Math.abs(ai.latitude - s.latitude);
         const dLng = Math.abs(ai.longitude - s.longitude);
         const distApprox = Math.sqrt(dLat * dLat + dLng * dLng) * 111320;
-        let catchRadius = 15;
-        let sonarOuter = 30;
+        let catchRadius = 10;
+        let sonarOuter = 20;
         if ((s.myTeam === 'cat') && (s.radarUntil || 0) > Date.now()) {
-          catchRadius = 40;
-          sonarOuter = 60;
+          catchRadius = 25;
+          sonarOuter = 40;
         }
 
-        // 指向性声呐脉冲 + 抓捕防连击（源原样）
+        // 指向性声呐脉冲（源原样）
         const sonarNow = Date.now();
         if (distApprox < sonarOuter && distApprox > catchRadius && sonarNow - (lastSonarAt || 0) > 900) {
           lastSonarAt = sonarNow;
           soundVibration.vibrateShort(distApprox < catchRadius * 1.6 ? 'heavy' : 'light');
-        } else if (distApprox <= catchRadius && !s.showCatchOverlay) {
-          const nowTs = Date.now();
-          if ((catchCdUntil || 0) > nowTs) return;
-          if (ai._lastCatchAt && (nowTs - ai._lastCatchAt < 10000)) return;
-          catchCdUntil = nowTs + 3000;
-          ai._lastCatchAt = nowTs;
-          if (s.isShieldActive) {
-            s.isShieldActive = false;
-            addSystemMessage('🛡️ [金钟罩] 护盾为你抵扣了一次相遇！');
-            soundVibration.vibrateShort('heavy');
+        }
+        if (distApprox > catchRadius) {
+          ai._proximitySince = 0;
+          return;
+        }
+        if (s.showCatchOverlay) return;
+        const nowTs = sonarNow;
+        // 即时判定（源逻辑）：进入抓捕范围立即触发
+        if (s.catchMode !== 'sustained') {
+          resolveOfflineCatch(ai, nowTs);
+          return;
+        }
+        if (!ai._proximitySince) {
+          ai._proximitySince = nowTs;
+          if (s.myTeam === 'cat') {
+            addSystemMessage(`🎯 [抓捕中] ${ai.name} 在抓捕范围内，保持接近 3 秒即可自动抓捕！`);
           } else {
-            const isCat = s.myTeam === 'cat';
-            const catName = isCat ? s.myName : ai.name;
-            const mouseName = isCat ? ai.name : s.myName;
-            const success = isCat || Math.random() < 0.3;
-
-            if (success) {
-              soundVibration.playSound('catch_success');
-              if (isCat) { s.myScore += 10; renderHud(); }
-            } else {
-              soundVibration.playSound('escape_success');
-              if (!isCat) { s.myScore += 5; renderHud(); }
-            }
-            onCatchEvent(catName, mouseName, success);
+            addSystemMessage(`⚠️ ${ai.name} 进入抓捕范围，快离开！`);
           }
         }
+        if (nowTs - ai._proximitySince < CATCH_PROXIMITY_MS) return;
+        ai._proximitySince = 0;
+        resolveOfflineCatch(ai, nowTs);
       });
     }
 
@@ -1172,11 +1217,15 @@ export function create(rootEl, globalStateRef) {
 
   /* ---------- 抓捕事件（源 L999-1019 原样） ---------- */
 
-  const onCatchEvent = (catName, mouseName, success) => {
+  const onCatchEvent = (catName, mouseName, success, ids = null) => {
     actionCount = (actionCount || 0) + 1;
-    if (success && catName === s.myName) myCatches = (myCatches || 0) + 1;
-    if (!success && mouseName === s.myName) myEscapes = (myEscapes || 0) + 1;
-    if (success && s.myTeam === 'cat' && catName === s.myName) {
+    // 联机事件带玩家 ID，按 ID 判定归属；单机按名字
+    const myId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'me';
+    const isMyCat = ids ? String(ids.catId) === String(myId) : catName === s.myName;
+    const isMyMouse = ids ? String(ids.mouseId) === String(myId) : mouseName === s.myName;
+    if (success && isMyCat) myCatches = (myCatches || 0) + 1;
+    if (!success && isMyMouse) myEscapes = (myEscapes || 0) + 1;
+    if (success && s.myTeam === 'cat' && isMyCat) {
       achievementManager.recordCatch();
     }
     const msg = success ? `🐱 ${catName} 追上了 🐭 ${mouseName}，相遇成功!` : `🐭 ${mouseName} 躲开了相遇，躲避成功!`;
@@ -1537,6 +1586,8 @@ export function create(rootEl, globalStateRef) {
     s.myName = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.name) || '玩家';
     s.equippedTitle = titleObj.icon + ' ' + titleObj.name;
     s.netMode = netMode;
+    // 抓捕判定方式：读自主页面设置（instant / sustained，默认 sustained）
+    s.catchMode = getStorage('catchMode') === 'instant' ? 'instant' : 'sustained';
     s.myScore = 0;
     s.distance = 0;
     s.battleFeed = [];

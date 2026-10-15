@@ -4,7 +4,6 @@ const GAME_PACKET_TYPES = new Set([
   'SYNC_ROOM_STATE',
   'PLAYER_MOVE',
   'USE_SKILL',
-  'CATCH_EVENT',
   'CHAT_MESSAGE',
   'GAME_PAUSE',
   'GAME_EXTEND',
@@ -13,6 +12,19 @@ const GAME_PACKET_TYPES = new Set([
   'RECONNECT_ACK',
   'MAP_ITEM_PICKUP'
 ]);
+
+// 服务器权威近距离抓捕参数：10 米范围内开始判定，猫雷达（火眼金睛）扩大到 25 米
+const CATCH_BASE_RADIUS_METERS = 10;
+const CATCH_RADAR_RADIUS_METERS = 25;
+// 抓捕判定方式：instant = 入范围立即判定（源逻辑）；sustained = 连续保持范围 3 秒自动抓捕（默认）
+const CATCH_MODE_INSTANT = 'instant';
+const CATCH_MODE_SUSTAINED = 'sustained';
+const CATCH_MODES = [CATCH_MODE_INSTANT, CATCH_MODE_SUSTAINED];
+const CATCH_PROXIMITY_MS = 3000;
+const CATCH_PAIR_COOLDOWN_MS = 10_000;
+const CATCH_POSITION_STALE_MS = 5000;
+const CATCH_RADAR_DURATION_MS = 10_000;
+const CATCH_SHIELD_DURATION_MS = 10_000;
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const stringId = value => (typeof value === 'string' || typeof value === 'number') && String(value).trim().length > 0
@@ -85,6 +97,8 @@ export class RoomRegistry {
         return;
       default:
         if (GAME_PACKET_TYPES.has(packet.type) && state.room) {
+          if (packet.type === 'PLAYER_MOVE') this.handlePlayerMove(state, payload);
+          if (packet.type === 'USE_SKILL') this.trackSkillEffect(state, payload);
           const forwarded = {
             type: packet.type,
             senderId: state.player.id,
@@ -94,6 +108,117 @@ export class RoomRegistry {
           this.broadcast(state.room, forwarded, ws);
         }
     }
+  }
+
+  handlePlayerMove(state, payload) {
+    const room = state.room;
+    if (!room || !state.player || room.phase !== 'STARTED') return;
+    const latitude = Number(payload.latitude);
+    const longitude = Number(payload.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return;
+    room.playerPositions.set(state.player.id, { latitude, longitude, at: this.now() });
+    this.evaluateProximityCatches(room);
+  }
+
+  trackSkillEffect(state, payload) {
+    const room = state.room;
+    if (!room || !state.player) return;
+    const skillId = typeof payload.skillId === 'string' ? payload.skillId : '';
+    const effects = room.skillEffects.get(state.player.id) || {};
+    const now = this.now();
+    if (skillId === 'cat_radar' && state.player.team === 'cat') {
+      effects.radarUntil = now + CATCH_RADAR_DURATION_MS;
+      room.skillEffects.set(state.player.id, effects);
+    } else if (skillId === 'golden_shield') {
+      effects.shieldUntil = now + CATCH_SHIELD_DURATION_MS;
+      room.skillEffects.set(state.player.id, effects);
+    }
+  }
+
+  distanceMeters(a, b) {
+    const dLat = Math.abs(a.latitude - b.latitude);
+    const dLng = Math.abs(a.longitude - b.longitude);
+    return Math.sqrt(dLat * dLat + dLng * dLng) * 111320;
+  }
+
+  forgetPlayerPairEntries(entries, playerId) {
+    for (const key of [...entries.keys()]) {
+      const index = key.indexOf(':');
+      if (index < 0) continue;
+      if (key.slice(0, index) === playerId || key.slice(index + 1) === playerId) entries.delete(key);
+    }
+  }
+
+  catchRadiusFor(room, catId, now) {
+    const radarUntil = room.skillEffects.get(catId)?.radarUntil || 0;
+    return radarUntil > now ? CATCH_RADAR_RADIUS_METERS : CATCH_BASE_RADIUS_METERS;
+  }
+
+  evaluateProximityCatches(room) {
+    const now = this.now();
+    const members = [...room.members.values()].filter(state => state.ws.readyState === OPEN);
+    const cats = members.filter(state => state.player.team === 'cat');
+    const mice = members.filter(state => state.player.team === 'mouse');
+    for (const cat of cats) {
+      for (const mouse of mice) {
+        const key = `${cat.player.id}:${mouse.player.id}`;
+        const catPos = room.playerPositions.get(cat.player.id);
+        const mousePos = room.playerPositions.get(mouse.player.id);
+        if (!catPos || !mousePos ||
+            now - catPos.at > CATCH_POSITION_STALE_MS || now - mousePos.at > CATCH_POSITION_STALE_MS) {
+          room.catchWindows.delete(key);
+          continue;
+        }
+        // 窗口起点取双方位置都有效的时刻，重新进入范围则清零重计
+        const windowStart = Math.min(
+          room.catchWindows.get(key) ?? now,
+          Math.max(catPos.at, mousePos.at)
+        );
+        if (this.distanceMeters(catPos, mousePos) <= this.catchRadiusFor(room, cat.player.id, now)) {
+          if (room.catchMode === CATCH_MODE_INSTANT) {
+            // 即时判定：猫一进入范围立即结算（冷却 / 金钟罩规则仍然生效）
+            this.resolveProximityCatch(room, cat, mouse, key, now);
+            continue;
+          }
+          // 3 秒持续判定：仅在持续处于范围内时累计
+          room.catchWindows.set(key, windowStart);
+          if (now - windowStart >= CATCH_PROXIMITY_MS) {
+            this.resolveProximityCatch(room, cat, mouse, key, now);
+          }
+        } else {
+          room.catchWindows.delete(key);
+        }
+      }
+    }
+  }
+
+  resolveProximityCatch(room, cat, mouse, key, now) {
+    if ((room.pairCooldowns.get(key) || 0) > now) {
+      room.catchWindows.delete(key);
+      return;
+    }
+    room.catchWindows.delete(key);
+    room.pairCooldowns.set(key, now + CATCH_PAIR_COOLDOWN_MS);
+    const effects = room.skillEffects.get(mouse.player.id);
+    if (effects && effects.shieldUntil > now) {
+      effects.shieldUntil = 0;
+      this.broadcast(room, this.packet('CATCH_EVENT', {
+        blocked: true,
+        catId: cat.player.id,
+        catName: cat.player.name,
+        mouseId: mouse.player.id,
+        mouseName: mouse.player.name
+      }, 'server'));
+      return;
+    }
+    this.broadcast(room, this.packet('CATCH_EVENT', {
+      success: true,
+      catId: cat.player.id,
+      catName: cat.player.name,
+      mouseId: mouse.player.id,
+      mouseName: mouse.player.name
+    }, 'server'));
   }
 
   handleMapItemPickup(state, payload) {
@@ -159,6 +284,11 @@ export class RoomRegistry {
         members: new Map(),
         knownPlayerIds: new Set(),
         pickedMapItemIds: new Set(),
+        playerPositions: new Map(),
+        catchWindows: new Map(),
+        pairCooldowns: new Map(),
+        skillEffects: new Map(),
+        catchMode: CATCH_MODES.includes(payload.catchMode) ? payload.catchMode : CATCH_MODE_SUSTAINED,
         hostId: playerId,
         phase: 'WAITING',
         startAt: null,
@@ -201,6 +331,7 @@ export class RoomRegistry {
       isHost: playerId === room.hostId,
       phase: room.phase,
       startAt: room.startAt,
+      catchMode: room.catchMode,
       gameArea: room.gameArea,
       gameDurationSeconds: room.gameDurationSeconds,
       pickedMapItemIds: [...room.pickedMapItemIds]
@@ -230,6 +361,10 @@ export class RoomRegistry {
 
     room.phase = 'STARTED';
     room.startAt = this.now() + 3000;
+    room.playerPositions.clear();
+    room.catchWindows.clear();
+    room.pairCooldowns.clear();
+    room.skillEffects.clear();
     this.broadcast(room, this.packet('ROOM_STARTED', {
       phase: room.phase,
       hostId: room.hostId,
@@ -321,6 +456,10 @@ export class RoomRegistry {
     const room = state.room;
     if (room && state.player && room.members.get(state.player.id) === state) {
       room.members.delete(state.player.id);
+      room.playerPositions.delete(state.player.id);
+      room.skillEffects.delete(state.player.id);
+      this.forgetPlayerPairEntries(room.catchWindows, state.player.id);
+      this.forgetPlayerPairEntries(room.pairCooldowns, state.player.id);
       if (room.members.size > 0) {
         this.broadcast(room, this.packet('PLAYER_LEFT', { playerId: state.player.id }, state.player.id));
         if (!preserveHost && room.phase === 'WAITING' && state.player.id === room.hostId) {

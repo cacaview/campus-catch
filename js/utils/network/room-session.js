@@ -16,6 +16,7 @@ export class RoomSession {
     this.hostIp = '';
     this.gameArea = null;
     this.gameDurationSeconds = 600;
+    this.catchMode = 'sustained';
     this.pickedMapItemIds = [];
   }
 
@@ -86,6 +87,7 @@ export class RoomSession {
     }
     if (payload.gameArea) this.gameArea = payload.gameArea;
     if (Number.isFinite(payload.gameDurationSeconds)) this.gameDurationSeconds = payload.gameDurationSeconds;
+    if (payload.catchMode === 'instant' || payload.catchMode === 'sustained') this.catchMode = payload.catchMode;
     if (Array.isArray(payload.pickedMapItemIds)) {
       this.pickedMapItemIds = payload.pickedMapItemIds
         .map(Number)
@@ -136,6 +138,7 @@ export class RoomSession {
     this.hostIp = '';
     this.gameArea = null;
     this.gameDurationSeconds = 600;
+    this.catchMode = 'sustained';
     this.pickedMapItemIds = [];
   }
 }

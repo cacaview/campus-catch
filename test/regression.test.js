@@ -263,3 +263,76 @@ test('regression: returning home after an online match clears the completed room
   assert.ok(homeOnShow, '未找到 home.onShow');
   assert.match(homeOnShow[1], /clearRoomSessionOnHome[\s\S]*?netMode = 'OFFLINE'[\s\S]*?createdRoomPasscode = ''[\s\S]*?joinPasscode = ''/);
 });
+
+test('regression: 单机抓捕判定双模式共存（10 米范围，即时 / 3 秒持续）', () => {
+  const src = read('js/views/game.js');
+  assert.match(src, /const CATCH_PROXIMITY_MS = 3000;/);
+  // 10 米开始判定（雷达扩大 25 米）；声呐外圈 20/40
+  assert.match(src, /let catchRadius = 10;/);
+  assert.match(src, /let sonarOuter = 20;/);
+  assert.match(src, /catchRadius = 25;/);
+  assert.match(src, /sonarOuter = 40;/);
+  // 抓捕判定方式：读自主页面设置（instant / sustained，默认 sustained）
+  assert.match(src, /s\.catchMode = getStorage\('catchMode'\) === 'instant' \? 'instant' : 'sustained';/);
+  // 即时判定（源逻辑）：进入抓捕范围立即触发
+  assert.match(src, /if \(s\.catchMode !== 'sustained'\) \{\s*resolveOfflineCatch\(ai, nowTs\);\s*return;/);
+  // 抓捕结算公共逻辑：防连点冷却 → 金钟罩吸收 → 结果
+  assert.match(src, /const resolveOfflineCatch = \(ai, nowTs\) => \{/);
+  assert.match(src, /ai\._lastCatchAt && \(nowTs - ai\._lastCatchAt < 10000\)/);
+  assert.match(src, /s\.isShieldActive[\s\S]*?护盾为你抵扣了一次抓捕/);
+  // 3 秒持续判定：入范围启动窗口、出范围清零、满 3 秒才触发
+  assert.match(src, /if \(!ai\._proximitySince\) \{\s*ai\._proximitySince = nowTs;/);
+  assert.match(src, /if \(distApprox > catchRadius\) \{\s*ai\._proximitySince = 0;\s*return;/);
+  assert.match(src, /if \(nowTs - ai\._proximitySince < CATCH_PROXIMITY_MS\) return;/);
+  // 旧的「一入范围立即相遇」分支已移除
+  assert.doesNotMatch(src, /else if \(distApprox <= catchRadius && !s\.showCatchOverlay\)/);
+  // 进入抓捕范围有提示（猫：保持接近；鼠：快离开）
+  assert.match(src, /保持接近 3 秒即可自动抓捕/);
+  assert.match(src, /进入抓捕范围，快离开/);
+});
+
+test('regression: 联机抓捕由中继权威判定，客户端按 ID 记分', () => {
+  const src = read('js/views/game.js');
+  // CATCH_EVENT 客户端只读：护盾拦截提示 + 按 ID 记分
+  assert.match(src, /if \(payload\.blocked\) \{/);
+  assert.match(src, /String\(payload\.catId\) === String\(myId\)/);
+  assert.match(src, /if \(payload\.success && isMyCat\) s\.myScore \+= 10;/);
+  assert.match(src, /if \(!payload\.success && isMyMouse\) s\.myScore \+= 5;/);
+  // onCatchEvent 支持 ID 归属判定
+  assert.match(src, /const onCatchEvent = \(catName, mouseName, success, ids = null\) => \{/);
+  assert.match(src, /const isMyCat = ids \? String\(ids\.catId\) === String\(myId\) : catName === s\.myName;/);
+
+  const server = read('server/lib/room-registry.js');
+  // 客户端伪造的 CATCH_EVENT 不再转发：白名单里没有它（只由中继广播）
+  const packetTypes = server.match(/const GAME_PACKET_TYPES = new Set\(\[[\s\S]*?\]\);/);
+  assert.ok(packetTypes, '中继缺少 GAME_PACKET_TYPES 转发白名单');
+  assert.doesNotMatch(packetTypes[0], /CATCH_EVENT/);
+  assert.match(server, /const CATCH_PROXIMITY_MS = 3000;/);
+  assert.match(server, /const CATCH_PAIR_COOLDOWN_MS = 10_000;/);
+  assert.match(server, /const CATCH_BASE_RADIUS_METERS = 10;/);
+  assert.match(server, /const CATCH_RADAR_RADIUS_METERS = 25;/);
+  // 判定方式：instant（入范围立即判定）/ sustained（3 秒持续，默认），由房主创建房间时设定
+  assert.match(server, /const CATCH_MODE_INSTANT = 'instant';/);
+  assert.match(server, /const CATCH_MODE_SUSTAINED = 'sustained';/);
+  assert.match(server, /if \(room\.catchMode === CATCH_MODE_INSTANT\) \{/);
+  assert.match(server, /catchMode: room\.catchMode,/);
+  assert.match(server, /this\.evaluateProximityCatches\(room\);/);
+  assert.match(server, /this\.resolveProximityCatch\(room, cat, mouse, key, now\);/);
+});
+
+test('regression: 主页面可设置抓捕判定方式（即时 / 3 秒持续）', () => {
+  const home = read('js/views/home.js');
+  // 主页面两个抓捕判定选项
+  assert.match(home, /id="catch-mode-instant" data-catch-mode="instant"/);
+  assert.match(home, /id="catch-mode-sustained" data-catch-mode="sustained"/);
+  // 选择持久化到 localStorage，默认 sustained
+  assert.match(home, /let catchMode = getStorage\('catchMode'\) === 'instant' \? 'instant' : 'sustained';/);
+  assert.match(home, /setStorage\('catchMode', catchMode\); renderCatchMode\(\);/);
+  // 创建房间时把判定方式带给中继
+  assert.match(home, /createIfMissingRoom: true,\s*catchMode\s*\}/);
+  const net = read('js/utils/network/network-manager.js');
+  assert.match(net, /catchMode: options\.catchMode/);
+  const session = read('js/utils/network/room-session.js');
+  assert.match(session, /if \(payload\.catchMode === 'instant' \|\| payload\.catchMode === 'sustained'\) this\.catchMode = payload\.catchMode;/);
+});
+

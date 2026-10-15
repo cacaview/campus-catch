@@ -98,7 +98,8 @@ export class NetworkManager {
         player: playerInfo,
         gameArea,
         gameDurationSeconds,
-        createIfMissingRoom: options.createIfMissingRoom === true
+        createIfMissingRoom: options.createIfMissingRoom === true,
+        catchMode: options.catchMode
       });
     }).catch(err => {
       console.error('[NetworkManager] Server connect failed:', err);

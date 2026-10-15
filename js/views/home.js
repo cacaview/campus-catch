@@ -18,7 +18,7 @@ const GUIDE_SLIDES = [
   {
     emoji: '🐱🐭',
     title: '欢迎来到校园定位活动',
-    desc: '在真实校园里用 GPS 位置进行定位相遇与躲避：靠近对方 15 米即触发相遇打卡；打卡奶酪得分、坚持到最后即可获胜。'
+    desc: '在真实校园里用 GPS 位置进行定位相遇与躲避：靠近对方 10 米即触发抓捕判定；打卡奶酪得分、坚持到最后即可获胜。'
   },
   {
     emoji: '📍',
@@ -138,6 +138,16 @@ const HOME_HTML = `
     </div>
   </div>
 
+  <!-- 抓捕判定方式 -->
+  <div class="network-mode-section">
+    <div class="section-title">🎯 抓捕判定方式（10 米范围）</div>
+    <div class="mode-tabs">
+      <div class="mode-tab" id="catch-mode-instant" data-catch-mode="instant">⚡ 即时抓捕</div>
+      <div class="mode-tab" id="catch-mode-sustained" data-catch-mode="sustained">⏱️ 3 秒持续抓捕</div>
+    </div>
+    <div class="info-sub" id="catch-mode-desc"></div>
+  </div>
+
   <!-- 服务器面板 -->
   <div class="lan-panel server-panel" id="home-server-panel" hidden>
     <div class="input-item">
@@ -177,7 +187,7 @@ const HOME_HTML = `
       <span class="arrow" id="home-rules-arrow">▼</span>
     </div>
     <div class="rules-content" id="home-rules" hidden>
-      <div>🐱 猫队目标：靠近鼠队成员 15 米内触发定位相遇（打卡）</div>
+      <div>🐱 猫队目标：靠近鼠队成员 10 米内触发抓捕（即时 / 3 秒持续，主页面可切换）</div>
       <div>🐭 鼠队目标：躲避猫队、打卡拾取奶酪、坚持到活动结束</div>
       <div>♾️ 人数无上限：支持十人、百人甚至千人同场定位活动！</div>
       <div>📍 房主先框选活动区域，成员越界后暂停计分与位置同步</div>
@@ -228,6 +238,7 @@ export function create(rootEl, globalStateRef) {
   let selectedTeam = null;
   let nickname = '';
   let netMode = 'OFFLINE';
+  let catchMode = getStorage('catchMode') === 'instant' ? 'instant' : 'sustained';
   let durationMinutes = 10;
   let createdRoomPasscode = '';
   let serverUrl = '';
@@ -312,6 +323,13 @@ export function create(rootEl, globalStateRef) {
     $('mode-server').classList.toggle('active', netMode === 'SERVER');
     $('home-server-panel').hidden = netMode !== 'SERVER';
     renderChecklist();
+  };
+  const renderCatchMode = () => {
+    $('catch-mode-instant').classList.toggle('active', catchMode === 'instant');
+    $('catch-mode-sustained').classList.toggle('active', catchMode === 'sustained');
+    $('catch-mode-desc').textContent = catchMode === 'instant'
+      ? '猫进入 10 米范围立即触发判定；联机以房主创建时设置为准'
+      : '猫鼠保持在 10 米范围内连续 3 秒才自动抓捕（默认）';
   };
   const renderTitles = () => {
     const eq = achievementManager.getEquippedTitleObj();
@@ -575,7 +593,8 @@ export function create(rootEl, globalStateRef) {
     showLoading({ title: '正在创建房间...' });
     startJoinWatchdog('创建房间');
     networkManager.connectServer(serverUrl, playerInfo, passcode, gameArea, gameDurationSeconds, {
-      createIfMissingRoom: true
+      createIfMissingRoom: true,
+      catchMode
     }).catch(err => {
       hideLoading();
       joinFlowPending = false;
@@ -665,7 +684,8 @@ export function create(rootEl, globalStateRef) {
           globalStateRef.currentPlayer,
           createdRoomPasscode,
           globalStateRef.gameArea,
-          globalStateRef.gameDurationSeconds
+          globalStateRef.gameDurationSeconds,
+          { catchMode }
         ).catch(() => {
           hideLoading();
           joinFlowPending = false;
@@ -698,7 +718,8 @@ export function create(rootEl, globalStateRef) {
         globalStateRef.currentPlayer,
         passcode,
         globalStateRef.gameArea,
-        globalStateRef.gameDurationSeconds
+        globalStateRef.gameDurationSeconds,
+        { catchMode }
       )
         .catch(() => {
           hideLoading();
@@ -728,6 +749,7 @@ export function create(rootEl, globalStateRef) {
     renderTeam();
     renderDuration();
     renderNetMode();
+    renderCatchMode();
     renderTitles();
     renderChallenge();
     maybeShowGuide();
@@ -756,6 +778,7 @@ export function create(rootEl, globalStateRef) {
         showToast({ title: `已带入房间身份码 ${q.passcode}`, icon: 'none' });
       }
       renderNetMode();
+      renderCatchMode();
     }
 
     // 首页活动区域始终以校园底图配准中心为准；实时 GPS 定位在游戏中使用。
@@ -853,6 +876,8 @@ export function create(rootEl, globalStateRef) {
 
     $('mode-offline').addEventListener('click', () => { netMode = 'OFFLINE'; renderNetMode(); });
     $('mode-server').addEventListener('click', () => { netMode = 'SERVER'; renderNetMode(); });
+    $('catch-mode-instant').addEventListener('click', () => { catchMode = 'instant'; setStorage('catchMode', catchMode); renderCatchMode(); });
+    $('catch-mode-sustained').addEventListener('click', () => { catchMode = 'sustained'; setStorage('catchMode', catchMode); renderCatchMode(); });
     $('home-create-server-room').addEventListener('click', createServerRoom);
     $('home-passcode-copy').addEventListener('click', copyRoomPasscode);
     $('home-join-link-copy').addEventListener('click', copyJoinLink);

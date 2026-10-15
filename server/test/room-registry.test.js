@@ -28,7 +28,7 @@ class FakeSocket {
 const player = (id, team = 'cat') => ({ id, name: `Player ${id}`, team });
 const packet = (type, payload = {}, senderId = '') => ({ type, senderId, timestamp: 1, payload });
 
-function joined(registry, id, passcode = '1234', team = 'cat', createIfMissingRoom = !registry.rooms.has(passcode)) {
+function joined(registry, id, passcode = '1234', team = 'cat', createIfMissingRoom = !registry.rooms.has(passcode), extra = {}) {
   const socket = new FakeSocket();
   registry.onConnection(socket);
   registry.handlePacket(socket, packet('JOIN_ROOM', {
@@ -36,7 +36,8 @@ function joined(registry, id, passcode = '1234', team = 'cat', createIfMissingRo
     player: player(id, team),
     gameArea: null,
     gameDurationSeconds: 600,
-    createIfMissingRoom
+    createIfMissingRoom,
+    ...extra
   }, id));
   return socket;
 }
@@ -104,7 +105,7 @@ test('forwardsExistingGameplayPacketsWithinRoom', () => {
   const sameRoom = joined(registry, 'same-room');
   const otherRoom = joined(registry, 'other-room', '9999');
   const gameplayTypes = [
-    'SYNC_ROOM_STATE', 'PLAYER_MOVE', 'USE_SKILL', 'CATCH_EVENT', 'GAME_PAUSE',
+    'SYNC_ROOM_STATE', 'PLAYER_MOVE', 'USE_SKILL', 'GAME_PAUSE',
     'GAME_EXTEND', 'PLAYER_KICK', 'RECONNECT', 'RECONNECT_ACK'
   ];
 
@@ -373,4 +374,286 @@ test('promotesNextMemberWhenWaitingHostDisconnects', () => {
     assert.equal(change.hostId, 'next-host');
     assert.equal(change.members.find(member => member.id === 'next-host').isHost, true);
   }
+});
+
+/* ---------- 服务器权威近距离自动抓捕（3 秒连续在范围内） ---------- */
+
+const BASE_LAT = 23.1598575;
+const BASE_LNG = 108.1912479;
+const metersToDeg = meters => meters / 111320;
+
+function startedCatchRoom(extra = {}) {
+  let now = 0;
+  const registry = new RoomRegistry({ now: () => now });
+  const cat = joined(registry, 'cat1', '1234', 'cat', true, extra);
+  const mouse = joined(registry, 'mouse1', '1234', 'mouse');
+  registry.handlePacket(cat, packet('ROOM_START_REQUEST'));
+  for (const socket of [cat, mouse]) socket.clear();
+  const move = (ws, latitude, longitude) =>
+    registry.handlePacket(ws, packet('PLAYER_MOVE', { latitude, longitude }));
+  return { registry, cat, mouse, move, at: value => { now = value; }, now: () => now };
+}
+
+test('ignores client-sent catch events', () => {
+  const { registry, cat, mouse } = startedCatchRoom();
+
+  registry.handlePacket(cat, packet('CATCH_EVENT', { catName: 'A', mouseName: 'B', success: true }, 'spoofed-id'));
+
+  assert.equal(cat.packets('CATCH_EVENT').length, 0);
+  assert.equal(mouse.packets('CATCH_EVENT').length, 0);
+});
+
+test('does not evaluate catches before the room starts', () => {
+  let now = 0;
+  const registry = new RoomRegistry({ now: () => now });
+  const cat = joined(registry, 'cat1');
+  const mouse = joined(registry, 'mouse1', '1234', 'mouse');
+  for (const socket of [cat, mouse]) socket.clear();
+  const move = (ws, latitude, longitude) =>
+    registry.handlePacket(ws, packet('PLAYER_MOVE', { latitude, longitude }));
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  now = 10_000;
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+
+  assert.equal(cat.packets('CATCH_EVENT').length, 0);
+  assert.equal(mouse.packets('CATCH_EVENT').length, 0);
+});
+
+test('auto-catches after three continuous seconds within range', () => {
+  const { cat, mouse, move, at } = startedCatchRoom();
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 窗口在 t=0 打开
+  at(2999);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 2999ms 尚不足 3 秒
+  assert.equal(cat.packets('CATCH_EVENT').length, 0);
+  assert.equal(mouse.packets('CATCH_EVENT').length, 0);
+
+  at(3000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 满 3 秒 → 自动抓捕
+  const events = cat.packets('CATCH_EVENT');
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].payload, {
+    success: true,
+    catId: 'cat1',
+    catName: 'Player cat1',
+    mouseId: 'mouse1',
+    mouseName: 'Player mouse1'
+  });
+  assert.equal(events[0].senderId, 'server');
+  assert.equal(mouse.packets('CATCH_EVENT').length, 1);
+  assert.deepEqual(mouse.packets('CATCH_EVENT')[0].payload, events[0].payload);
+});
+
+test('resets the catch window when the pair leaves range', () => {
+  const { cat, mouse, move, at } = startedCatchRoom();
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 窗口 t=0
+  at(2000);
+  move(cat, BASE_LAT + metersToDeg(100), BASE_LNG); // 离开范围 → 窗口清零
+  at(4000);
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 重新进入，窗口 t=4000
+  at(6999);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 0, '重新接近后需要重新累计 3 秒');
+  at(7000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
+});
+
+test('stale positions do not trigger a catch', () => {
+  const { cat, mouse, move, at } = startedCatchRoom();
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  at(10_000); // 双方位置均已超过 5 秒过期
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+
+  assert.equal(cat.packets('CATCH_EVENT').length, 0);
+  assert.equal(mouse.packets('CATCH_EVENT').length, 0);
+});
+
+test('golden shield absorbs one proximity catch and is consumed', () => {
+  const { registry, cat, mouse, move, at } = startedCatchRoom();
+
+  registry.handlePacket(mouse, packet('USE_SKILL', { skillId: 'golden_shield', playerName: 'Player mouse1' }));
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  at(3000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+
+  const blocked = cat.packets('CATCH_EVENT');
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0].payload.blocked, true);
+  assert.equal(blocked[0].payload.catId, 'cat1');
+  assert.equal(blocked[0].payload.mouseId, 'mouse1');
+  assert.equal(mouse.packets('CATCH_EVENT')[0].payload.blocked, true);
+
+  // 护盾已消耗：冷却期后的第二次相遇应被正常抓捕
+  at(13_000);
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  at(16_000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+
+  const events = cat.packets('CATCH_EVENT');
+  assert.equal(events.length, 2);
+  assert.equal(events[1].payload.blocked, undefined);
+  assert.equal(events[1].payload.success, true);
+});
+
+test('pair cooldown prevents an immediate recatch', () => {
+  const { cat, mouse, move, at } = startedCatchRoom();
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  at(3000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
+
+  at(12_000); // 仍在 10 秒冷却内
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
+  at(13_000);
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 冷却结束，重新累计 3 秒
+  at(16_000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 2);
+});
+
+test('cat radar skill extends the catch radius to 25 meters', () => {
+  const { registry, cat, mouse, move, at } = startedCatchRoom();
+
+  // 20 米：基础 10 米范围外
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+  at(3000);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 0, '未开雷达时 20 米不会触发抓捕');
+
+  registry.handlePacket(cat, packet('USE_SKILL', { skillId: 'cat_radar', playerName: 'Player cat1' }));
+  at(4000);
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG); // 雷达生效，窗口 t=4000
+  at(6999);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 0);
+  at(7000);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
+});
+
+test('radar radius expires after its duration', () => {
+  const { registry, cat, mouse, move, at } = startedCatchRoom();
+
+  registry.handlePacket(cat, packet('USE_SKILL', { skillId: 'cat_radar', playerName: 'Player cat1' }));
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+  at(12_000); // 雷达 10 秒已过期，20 米超出基础 10 米范围
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+
+  assert.equal(cat.packets('CATCH_EVENT').length, 0);
+});
+
+test('ignores radar skill from a mouse player', () => {
+  const { registry, cat, mouse, move, at } = startedCatchRoom();
+
+  registry.handlePacket(mouse, packet('USE_SKILL', { skillId: 'cat_radar', playerName: 'Player mouse1' }));
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+  at(12_000);
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(20), BASE_LNG);
+
+  assert.equal(cat.packets('CATCH_EVENT').length, 0);
+});
+
+/* ---------- 两种抓捕判定方式共存：即时 / 3 秒持续 ---------- */
+
+test('instant mode resolves the catch on the first in-range move', () => {
+  const { cat, mouse, move } = startedCatchRoom({ catchMode: 'instant' });
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 一进入范围立即判定
+
+  const events = cat.packets('CATCH_EVENT');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.success, true);
+  assert.equal(mouse.packets('CATCH_EVENT').length, 1);
+});
+
+test('instant mode pair cooldown prevents an immediate recatch', () => {
+  const { cat, mouse, move, at } = startedCatchRoom({ catchMode: 'instant' });
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  at(1000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1, '冷却期内不重复抓捕');
+  at(10_000);
+  move(mouse, BASE_LAT, BASE_LNG); // 刷新位置，避免 5 秒过期
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 2);
+});
+
+test('instant mode golden shield blocks the first encounter and is consumed', () => {
+  const { registry, cat, mouse, move, at } = startedCatchRoom({ catchMode: 'instant' });
+
+  registry.handlePacket(mouse, packet('USE_SKILL', { skillId: 'golden_shield', playerName: 'Player mouse1' }));
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+
+  const events = cat.packets('CATCH_EVENT');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.blocked, true);
+  at(11_000); // 护盾已消耗，10 秒冷却也结束
+  move(mouse, BASE_LAT, BASE_LNG); // 刷新位置，避免 5 秒过期
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 立即再捕
+  assert.equal(cat.packets('CATCH_EVENT').length, 2);
+  assert.equal(cat.packets('CATCH_EVENT')[1].payload.success, true);
+});
+
+test('room stores the creator catchMode and exposes it in JOIN_ACK', () => {
+  const registry = new RoomRegistry();
+  const host = joined(registry, 'host', '4321', 'cat', true, { catchMode: 'instant' });
+  assert.equal(host.packets('JOIN_ACK').at(-1).payload.catchMode, 'instant');
+  const guest = joined(registry, 'guest', '4321', 'mouse', false, { catchMode: 'sustained' });
+  assert.equal(guest.packets('JOIN_ACK').at(-1).payload.catchMode, 'instant', '成员设置不覆盖房主');
+});
+
+test('invalid catchMode falls back to the sustained three-second window', () => {
+  const registry = new RoomRegistry();
+  const host = joined(registry, 'host', '4322', 'cat', true, { catchMode: 'bogus' });
+  assert.equal(host.packets('JOIN_ACK').at(-1).payload.catchMode, 'sustained');
+
+  const { cat, mouse, move, at } = startedCatchRoom({ catchMode: 'bogus' });
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  at(2999);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 0, '非法设置回退 3 秒持续判定');
+  at(3000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
+});
+
+test('rejects out-of-range coordinates without evaluating catches', () => {
+  const { registry, cat, mouse, move, at } = startedCatchRoom();
+  const room = registry.rooms.get('1234');
+
+  registry.handlePacket(cat, packet('PLAYER_MOVE', { latitude: 999, longitude: 181 }));
+  assert.equal(room.playerPositions.has('cat1'), false, '非法坐标不入库');
+
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  at(4000);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+
+  assert.equal(cat.packets('CATCH_EVENT').length, 1, '合法位置仍正常累计抓捕');
 });
