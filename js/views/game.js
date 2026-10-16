@@ -817,11 +817,17 @@ export function create(rootEl, globalStateRef) {
   };
 
   const updateRemotePlayerPosition = player => {
-    const member = roomSession.members.find(m => String(m.id) === String(player.id));
-    if (!member || String(member.id) === String(globalStateRef.currentPlayer?.id)) return;
+    const myId = String(globalStateRef.currentPlayer?.id ?? '');
+    if (!player?.id || String(player.id) === myId) return;
     if (!isValidPosition(player)) return;
+    const member = roomSession.members.find(m => String(m.id) === String(player.id));
+    // 即使 members 里暂无对方记录（PLAYER_JOINED 尚未到达 / 重连期间），
+    // 也直接用 payload 里的权威信息构建 remote，避免静默丢弃位置更新。
+    const name = (member && member.name) || String(player.name || player.id);
+    const team = (member && member.team) || player.team;
+    if (!['cat', 'mouse'].includes(team)) return;
     const remote = {
-      id: String(member.id), name: member.name, team: member.team,
+      id: String(player.id), name, team,
       latitude: player.latitude, longitude: player.longitude, score: normalizeScore(player.score),
       stealthActive: player.stealthActive === true,
       disguiseActive: player.disguiseActive === true,

@@ -73,15 +73,21 @@ test('history scores normalize malicious legacy values and clamp finite numbers'
   assert.match(html, /1000000/);
 });
 
-test('remote movement uses roster identities and resets stale players on entry', () => {
+test('remote movement prefers roster identities, accepts pre-roster updates, and resets stale players on entry', () => {
   const h = harness('game');
   h.view.onShow();
   h.listeners.get('PLAYER_MOVE')({ id: 'other', name: payload, team: 'cat', score: payload, latitude: 1, longitude: 2 });
   assert.equal(h.view.ai()[0].name, 'Canonical');
   assert.equal(h.view.ai()[0].team, 'mouse');
   assert.equal(h.view.ai()[0].score, 0);
-  h.listeners.get('PLAYER_MOVE')({ id: 'unknown', score: 2, latitude: 1, longitude: 2 });
-  assert.equal(h.view.ai().length, 1);
+  h.listeners.get('PLAYER_MOVE')({ id: 'unknown', name: 'Joining', team: 'mouse', score: 2, latitude: 1, longitude: 2 });
+  assert.equal(h.view.ai().length, 2);
+  const joining = h.view.ai().find(player => player.id === 'unknown');
+  assert.equal(joining.name, 'Joining');
+  assert.equal(joining.team, 'mouse');
+  assert.equal(joining.score, 2);
+  h.listeners.get('PLAYER_MOVE')({ id: 'invalid', name: 'Invalid', score: 2, latitude: 1, longitude: 2 });
+  assert.equal(h.view.ai().length, 2);
   h.view.onHide();
   h.roomSession.members = [h.state.currentPlayer];
   h.view.onShow();

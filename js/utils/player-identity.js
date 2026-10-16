@@ -15,7 +15,7 @@ function getStablePlayerId() {
     }
     return id;
   } catch (e) {
-    return 'u_' + Date.now().toString(36);
+    return 'u_' + Date.now().toString(36) + Math.floor(Math.random() * 46656).toString(36);
   }
 }
 
