@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { roomSession } from '../js/utils/network/room-session.js';
+import { RoomSession, roomSession } from '../js/utils/network/room-session.js';
 
 // 假 WebSocket（注入全局），记录实例与已发送消息
 class FakeWebSocket {
@@ -35,6 +35,12 @@ FakeWebSocket.nextBehavior = 'open';
 
 beforeEach(() => {
   roomSession.reset();
+  const values = new Map();
+  globalThis.sessionStorage = {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key)
+  };
   FakeWebSocket.instances = [];
   FakeWebSocket.nextBehavior = 'open';
   globalThis.WebSocket = FakeWebSocket;
@@ -229,4 +235,277 @@ test('automatic reconnect reuses the current room code and game configuration', 
   assert.deepEqual(reconnectJoin.payload.gameArea, gameArea);
   assert.equal(reconnectJoin.payload.gameDurationSeconds, 1200);
   nm.disconnect();
+});
+
+test('private reconnect token is retained for the same destination and never sent to a different relay', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const player = { id: 'host', name: 'Host', team: 'cat' };
+  roomSession.createRoom(player, '4321');
+  const nm = new NM();
+  try {
+    await nm.connectServer('wss://example.test', player, '4321');
+    FakeWebSocket.instances[0].onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: {
+      success: true, reconnectToken: 'private-own-token', members: [player]
+    } }) });
+    assert.equal(roomSession.reconnectToken, 'private-own-token');
+    assert.ok(roomSession.members.every(member => !('reconnectToken' in member)));
+    await nm.connectServer('wss://example.test', player, '4321');
+    assert.equal(JSON.parse(FakeWebSocket.instances[1].sent[0]).payload.reconnectToken, 'private-own-token');
+    await nm.connectServer('wss://other.test', player, '4321');
+    assert.equal(JSON.parse(FakeWebSocket.instances[2].sent[0]).payload.reconnectToken, undefined);
+    roomSession.reset();
+    assert.equal(roomSession.reconnectToken, '');
+  } finally { nm.disconnect(); }
+});
+
+test('disconnect settles a pending connect and clears its timeout', async () => {
+  const { default: Adapter } = await import('../js/utils/network/websocket-adapter.js');
+  FakeWebSocket.nextBehavior = 'pending';
+  const adapter = new Adapter();
+  const outcome = adapter.connect('wss://pending.test').then(() => 'opened', () => 'cancelled');
+  adapter.disconnect();
+  assert.equal(adapter._connectTimeout, null);
+  assert.equal(await Promise.race([outcome, sleep(30).then(() => 'unsettled')]), 'cancelled');
+});
+
+test('callbacks captured from a replaced socket cannot change the new socket state', async () => {
+  const { default: Adapter } = await import('../js/utils/network/websocket-adapter.js');
+  const adapter = new Adapter();
+  await adapter.connect('wss://first.test');
+  const old = FakeWebSocket.instances[0];
+  const lateClose = old.onclose;
+  const lateMessage = old.onmessage;
+  let messages = 0;
+  adapter.onMessageCallback = () => messages++;
+  try {
+    await adapter.connect('wss://second.test');
+    lateClose({ code: 1006 });
+    lateMessage({ data: 'stale' });
+    assert.equal(adapter.isConnected, true);
+    assert.equal(messages, 0);
+  } finally { adapter.disconnect(); }
+});
+
+test('automatic failures stop at the configured retry limit without unhandled rejections', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const player = { id: 'host', name: 'Host', team: 'cat' };
+  roomSession.createRoom(player, '4321');
+  const nm = new NM();
+  nm.maxReconnectAttempts = 2;
+  try {
+    await nm.connectServer('wss://example.test', player, '4321');
+    FakeWebSocket.nextBehavior = 'error';
+    FakeWebSocket.instances[0].onclose({ code: 1006 });
+    await sleep(3300);
+    assert.equal(FakeWebSocket.instances.length, 3);
+    assert.equal(nm.reconnectAttempts, 2);
+    assert.equal(nm.state, 'DISCONNECTED');
+    assert.equal(nm.reconnectTimer, null);
+  } finally { nm.disconnect(); }
+});
+
+test('opening a retry socket preserves retry count until JOIN_ACK', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const nm = new NM();
+  try {
+    await nm.connectServer('wss://example.test', { id: 'a', name: 'A', team: 'cat' }, '1234');
+    nm.reconnectAttempts = 3;
+    nm.triggerAutoReconnect();
+    assert.equal(nm.reconnectAttempts, 4);
+    clearTimeout(nm.reconnectTimer);
+    nm.reconnectTimer = null;
+    await nm.connectServer('wss://example.test', { id: 'a', name: 'A', team: 'cat' }, '1234', null, 600, { reconnect: true });
+    assert.equal(nm.reconnectAttempts, 4);
+    FakeWebSocket.instances.at(-1).onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: { success: true } }) });
+    assert.equal(nm.reconnectAttempts, 0);
+  } finally { nm.disconnect(); }
+});
+
+test('malformed incoming packets are ignored before room consumers', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const nm = new NM();
+  for (const packet of [null, [], { type: 'JOIN_ACK', payload: null }, { type: 'JOIN_ACK', payload: [] }]) {
+    assert.doesNotThrow(() => nm.handleIncomingMessage(JSON.stringify(packet)));
+  }
+});
+
+test('queued reconnect is cancelled when disconnecting or switching the target', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const nm = new NM();
+  const player = { id: 'a', name: 'A', team: 'cat' };
+  try {
+    await nm.connectServer('wss://first.test', player, '1234');
+    nm.triggerAutoReconnect();
+    nm.disconnect();
+    await sleep(1100);
+    assert.equal(FakeWebSocket.instances.length, 1);
+    await nm.connectServer('wss://first.test', player, '1234');
+    nm.triggerAutoReconnect();
+    await nm.connectServer('wss://second.test', player, '5678');
+    await sleep(1100);
+    assert.equal(FakeWebSocket.instances.length, 3);
+    assert.equal(FakeWebSocket.instances.at(-1).url, 'wss://second.test');
+    assert.equal(nm.state, 'CONNECTED');
+  } finally { nm.disconnect(); }
+});
+
+test('RoomSession clears a private token when creating a fresh room', () => {
+  roomSession.applyJoinAck({ reconnectToken: 'old-private-token' });
+  roomSession.createRoom({ id: 'a', name: 'A', team: 'cat' }, '5678');
+  assert.equal(roomSession.reconnectToken, '');
+});
+
+test('JOIN_ACK adopts the authoritative self profile and pause state', () => {
+  const session = new RoomSession();
+  session.myPlayer = { id: 'self', name: 'Stale', team: 'cat', score: 2 };
+  session.applyJoinAck({ members: [
+    { id: 'self', name: 'Original', team: 'mouse', score: 24 },
+    { id: 'other', name: 'Other', team: 'cat', score: 0 }
+  ], paused: true });
+  assert.equal(session.myPlayer.name, 'Original');
+  assert.equal(session.myPlayer.team, 'mouse');
+  assert.equal(session.myPlayer.score, 24);
+  assert.equal(session.paused, true);
+});
+
+test('Protocol rejects nonobject packets and payloads rather than passing malformed data to consumers', async () => {
+  const { Protocol } = await import('../js/utils/network/protocol.js');
+  for (const packet of [null, [], 7, { type: 'JOIN_ACK', payload: null },
+    { type: 'JOIN_ACK', payload: [] }, { type: 'JOIN_ACK', payload: 'x' }, { type: [], payload: {} }]) {
+    assert.equal(Protocol.decode(JSON.stringify(packet)), null);
+  }
+});
+
+test('Protocol ignores nonstring transport input without invoking object coercion', async () => {
+  const { Protocol } = await import('../js/utils/network/protocol.js');
+  let coerced = false;
+  assert.equal(Protocol.decode({ toString() { coerced = true; return '{"type":"JOIN_ACK","payload":{}}'; } }), null);
+  assert.equal(coerced, false);
+});
+
+test('automatic reconnect uses room configuration accepted by JOIN_ACK', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const nm = new NM();
+  const player = { id: 'guest', name: 'Guest', team: 'mouse' };
+  const gameArea = { type: 'polygon', points: [{ latitude: 3, longitude: 4 }] };
+  try {
+    await nm.connectServer('wss://example.test', player, '4321', null, 600);
+    FakeWebSocket.instances[0].onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: {
+      success: true, reconnectToken: 'own-private-token', gameArea, gameDurationSeconds: 1200, catchMode: 'instant'
+    } }) });
+    nm.triggerAutoReconnect();
+    await sleep(1100);
+    const join = JSON.parse(FakeWebSocket.instances.at(-1).sent[0]);
+    assert.deepEqual(join.payload.gameArea, gameArea);
+    assert.equal(join.payload.gameDurationSeconds, 1200);
+    assert.equal(join.payload.catchMode, 'instant');
+    assert.equal(join.payload.reconnectToken, 'own-private-token');
+  } finally { nm.disconnect(); }
+});
+
+
+test('page reload restores only the exact relay room and player private token', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const player = { id: 'stable-player', name: 'A', team: 'cat' };
+  const first = new NM();
+  await first.connectServer('wss://example.test/ws', player, '4321');
+  FakeWebSocket.instances.at(-1).onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: {
+    success: true, reconnectToken: 'reload-private-token', members: [player]
+  } }) });
+  // Browser unload tears down transport and JS memory without an intentional leave.
+  first.stopHeartbeat();
+  first.wsAdapter.disconnect();
+  Object.assign(roomSession, new RoomSession());
+  const reloaded = new NM();
+  try {
+    await reloaded.connectServer('wss://example.test/ws', player, '4321');
+    assert.equal(JSON.parse(FakeWebSocket.instances.at(-1).sent[0]).payload.reconnectToken, 'reload-private-token');
+    assert.ok(roomSession.members.every(member => !('reconnectToken' in member)));
+    await reloaded.connectServer('wss://example.test/ws', { ...player, id: 'different' }, '4321');
+    assert.equal(JSON.parse(FakeWebSocket.instances.at(-1).sent[0]).payload.reconnectToken, undefined);
+  } finally { reloaded.disconnect(); }
+});
+
+test('intentional disconnect clears persisted reconnect authority', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const player = { id: 'stable-player', name: 'A', team: 'cat' };
+  const first = new NM();
+  await first.connectServer('wss://example.test/ws', player, '4321');
+  FakeWebSocket.instances.at(-1).onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: {
+    success: true, reconnectToken: 'leave-private-token'
+  } }) });
+  first.disconnect();
+  assert.equal(roomSession.reconnectToken, '');
+  Object.assign(roomSession, new RoomSession());
+  const next = new NM();
+  try {
+    await next.connectServer('wss://example.test/ws', player, '4321');
+    assert.equal(JSON.parse(FakeWebSocket.instances.at(-1).sent[0]).payload.reconnectToken, undefined);
+  } finally { next.disconnect(); }
+});
+
+test('replaced and kicked close codes terminate pending retries and private authority', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  for (const code of [4001, 4003]) {
+    const nm = new NM();
+    try {
+      await nm.connectServer('wss://example.test/ws', { id: 'a', name: 'A', team: 'cat' }, '4321');
+      FakeWebSocket.instances.at(-1).onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: {
+        success: true, reconnectToken: 'terminal-private-token'
+      } }) });
+      nm.triggerAutoReconnect();
+      FakeWebSocket.instances.at(-1).onclose({ code });
+      assert.equal(nm.state, 'DISCONNECTED');
+      assert.equal(nm.mode, 'OFFLINE');
+      assert.equal(nm.reconnectTimer, null);
+      assert.equal(roomSession.reconnectToken, '');
+    } finally { nm.disconnect(); }
+  }
+});
+
+test('explicit leave clears private reconnect authority before a new page joins', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const nm = new NM();
+  try {
+    await nm.connectServer('wss://example.test/ws', { id: 'a', name: 'A', team: 'cat' }, '4321');
+    FakeWebSocket.instances.at(-1).onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: {
+      success: true, reconnectToken: 'leaving-private-token'
+    } }) });
+    assert.equal(nm.send('LEAVE_ROOM'), true);
+    assert.equal(roomSession.reconnectToken, '');
+    assert.equal(sessionStorage.getItem('campusCatch.privateReconnect'), null);
+  } finally { nm.disconnect(); }
+});
+
+test('RoomSession reset and fresh room creation remove the persisted scope', () => {
+  const scope = JSON.stringify(['wss://example.test/ws', '4321', 'a']);
+  for (const action of ['reset', 'create']) {
+    roomSession.restoreReconnectToken(scope);
+    roomSession.applyJoinAck({ reconnectToken: 'private-own-token' });
+    assert.ok(sessionStorage.getItem('campusCatch.privateReconnect'));
+    if (action === 'reset') roomSession.reset();
+    else roomSession.createRoom({ id: 'a' }, '4321');
+    assert.equal(sessionStorage.getItem('campusCatch.privateReconnect'), null);
+    assert.equal(new RoomSession().restoreReconnectToken(scope), '');
+  }
+});
+
+test('unavailable sessionStorage leaves in-memory reconnect usable', async () => {
+  const { default: NM } = await import('../js/utils/network/network-manager.js');
+  const storage = globalThis.sessionStorage;
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get() { throw new Error('SecurityError'); } });
+  const nm = new NM();
+  try {
+    const player = { id: 'a', name: 'A', team: 'cat' };
+    await nm.connectServer('wss://example.test/ws', player, '4321');
+    FakeWebSocket.instances.at(-1).onmessage({ data: JSON.stringify({ type: 'JOIN_ACK', payload: {
+      success: true, reconnectToken: 'memory-private-token'
+    } }) });
+    await nm.connectServer('wss://example.test/ws', player, '4321');
+    assert.equal(JSON.parse(FakeWebSocket.instances.at(-1).sent[0]).payload.reconnectToken, 'memory-private-token');
+    assert.doesNotThrow(() => nm.disconnect());
+  } finally {
+    nm.disconnect();
+    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, writable: true, value: storage });
+  }
 });

@@ -3,14 +3,19 @@
  * 区分 房主 (Host) 与 从机 (Client)，处理身份码校验与状态管理
  */
 
+const RECONNECT_STORAGE_KEY = 'campusCatch.privateReconnect';
+
 export class RoomSession {
   constructor() {
     this.roomId = '';
     this.passcode = '';
+    this.reconnectToken = '';
+    this.reconnectScope = '';
     this.isHost = false;
     this.hostId = '';
     this.phase = 'WAITING';
     this.startAt = null;
+    this.paused = false;
     this.myPlayer = null;
     this.members = [];
     this.hostIp = '';
@@ -24,10 +29,12 @@ export class RoomSession {
    * 创建房间 (作房主)
    */
   createRoom(hostPlayer, passcode, gameArea = null, gameDurationSeconds = 600) {
+    this.clearReconnectToken();
     this.isHost = true;
     this.hostId = String(hostPlayer?.id || '');
     this.phase = 'WAITING';
     this.startAt = null;
+    this.paused = false;
     this.passcode = passcode || '8888';
     this.roomId = 'ROOM_' + Math.floor(1000 + Math.random() * 9000);
     this.myPlayer = hostPlayer;
@@ -74,6 +81,16 @@ export class RoomSession {
   }
 
   applyJoinAck(payload = {}, serverTimestamp = null) {
+    if (typeof payload.reconnectToken === 'string' && payload.reconnectToken) {
+      this.reconnectToken = payload.reconnectToken;
+      if (this.reconnectScope) {
+        try {
+          globalThis.sessionStorage?.setItem(RECONNECT_STORAGE_KEY, JSON.stringify({
+            scope: this.reconnectScope, token: this.reconnectToken
+          }));
+        } catch { /* Storage may be blocked; in-memory reconnect still works. */ }
+      }
+    }
     if (payload.roomId) this.roomId = payload.roomId;
     if (payload.hostId) this.hostId = String(payload.hostId);
     if (typeof payload.isHost === 'boolean') this.isHost = payload.isHost;
@@ -84,7 +101,10 @@ export class RoomSession {
       this.members = payload.members
         .filter(member => member && member.id != null)
         .map(member => ({ ...member, isHost: String(member.id) === this.hostId }));
+      const self = this.members.find(member => String(member.id) === String(this.myPlayer?.id));
+      if (self) this.myPlayer = { ...self };
     }
+    if (typeof payload.paused === 'boolean') this.paused = payload.paused;
     if (payload.gameArea) this.gameArea = payload.gameArea;
     if (Number.isFinite(payload.gameDurationSeconds)) this.gameDurationSeconds = payload.gameDurationSeconds;
     if (payload.catchMode === 'instant' || payload.catchMode === 'sustained') this.catchMode = payload.catchMode;
@@ -113,6 +133,7 @@ export class RoomSession {
   applyRoomStarted(payload = {}, serverTimestamp = null) {
     this.phase = 'STARTED';
     this.startAt = this.localStartAt(payload.startAt, serverTimestamp);
+    this.paused = false;
   }
 
   localStartAt(serverStartAt, serverTimestamp) {
@@ -123,16 +144,40 @@ export class RoomSession {
     return Date.now() + Math.max(0, delay);
   }
 
+  restoreReconnectToken(scope) {
+    if (this.reconnectScope && this.reconnectScope !== scope) this.clearReconnectToken();
+    if (this.reconnectScope !== scope) this.reconnectToken = '';
+    this.reconnectScope = scope;
+    try {
+      const stored = JSON.parse(globalThis.sessionStorage?.getItem(RECONNECT_STORAGE_KEY) || 'null');
+      if (stored?.scope === scope && typeof stored.token === 'string' && stored.token) {
+        this.reconnectToken = stored.token;
+      }
+    } catch { /* Invalid or inaccessible storage must not prevent a connection. */ }
+    return this.reconnectToken;
+  }
+
+  clearReconnectToken() {
+    this.reconnectToken = '';
+    this.reconnectScope = '';
+    try {
+      globalThis.sessionStorage?.removeItem(RECONNECT_STORAGE_KEY);
+    } catch { /* Browser privacy settings can disable session storage. */ }
+  }
+
   /**
    * 重置房间
    */
   reset() {
+    this.clearReconnectToken();
     this.roomId = '';
     this.passcode = '';
+    this.reconnectToken = '';
     this.isHost = false;
     this.hostId = '';
     this.phase = 'WAITING';
     this.startAt = null;
+    this.paused = false;
     this.myPlayer = null;
     this.members = [];
     this.hostIp = '';

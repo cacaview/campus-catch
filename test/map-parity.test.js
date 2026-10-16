@@ -54,16 +54,16 @@ test('MapView adapts a mini-program GCJ-02 ground overlay to MapLibre coordinate
       [110.276669, 25.091764],
       [110.269300, 25.091771]
     ], 'GCJ-02 southwest/northeast bounds must be converted into MapLibre NW/NE/SE/SW corners');
-    assert.deepEqual(mapOptions.center, [110.273130, 25.096525],
-      'the initial center must stay at the converted mini-program center');
+    assert.deepEqual(mapOptions.center, [108.1912479, 23.1598575],
+      'the initial center must stay at the Nanning campus center');
     assert.equal(mapOptions.zoom, 16.1,
       'the initial zoom must match the mini-program scale');
     assert.equal(mapOptions.minZoom, 16,
       'the map must preserve the mini-program minimum scale');
     assert.deepEqual(mapOptions.maxBounds, [
-      [110.268069, 25.090945],
-      [110.277350, 25.102432]
-    ], 'the camera must stay within the converted mini-program map boundary');
+      [108.1832, 23.1548],
+      [108.1964, 23.1656]
+    ], 'the camera must stay near the calibrated Nanning campus image');
     assert.equal(campusLayer?.paint?.['raster-opacity'], overlay.opacity,
       'the adapter must preserve the mini-program overlay opacity');
     const visibleState = id => layoutChanges.filter(([layerId, property]) => layerId === id && property === 'visibility').at(-1)?.[2];
@@ -86,13 +86,13 @@ test('MapView adapts a mini-program GCJ-02 ground overlay to MapLibre coordinate
     const defaultLayer = layers.filter(layer => layer.id === 'campus-map-layer').at(-1);
     assert.equal(defaultImage?.url, new URL('../assets/campus-map.jpg', import.meta.url).href);
     assert.deepEqual(defaultImage?.coordinates, [
-      [110.269299, 25.101855],
-      [110.276669, 25.101848],
-      [110.276669, 25.091764],
-      [110.269300, 25.091771]
-    ], 'the bundled campus image must keep the mini-program alignment');
-    assert.equal(defaultLayer?.paint?.['raster-opacity'], 0.8,
-      'the bundled campus image must retain the mini-program opacity');
+      [108.187129, 23.1645811],
+      [108.195453, 23.1607256],
+      [108.1936792, 23.15581],
+      [108.1841647, 23.1592434]
+    ], 'the bundled campus image must use the calibrated WGS-84 corners');
+    assert.equal(defaultLayer?.paint?.['raster-opacity'], 1,
+      'the bundled campus image must retain the calibrated opacity');
     defaultView.destroy();
   } finally {
     if (oldWindow === undefined) delete globalThis.window;

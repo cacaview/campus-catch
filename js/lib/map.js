@@ -1,29 +1,22 @@
 // MapLibre 封装：全应用唯一 MapLibre 使用点（home 框选 / game 主地图 / result 回放）
 // 注意：addSource/addLayer 必须等 map 'load' 事件，未就绪的图层操作走缓存，load 后统一应用
-// 校园图片范围沿用小程序地图图层边界（GCJ-02），转换为 WGS-84 后用于 MapLibre。
+// 校园图片校准坐标由 MapLibre 校准页导出，坐标系为 WGS-84。
 // 默认在 Esri 卫星底图上叠加本地校园图；游戏中可切换到纯卫星图。
-import { gcj02ToWgs84, miniProgramGroundOverlayToMapLibre } from '../utils/map-coordinates.js';
+import { miniProgramGroundOverlayToMapLibre } from '../utils/map-coordinates.js?v=20261008campus';
 const SAT_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const CAMPUS_MAP_URL = new URL('../../assets/campus-map.jpg', import.meta.url).href;
 const CAMPUS_GROUND_OVERLAY = {
   src: CAMPUS_MAP_URL,
-  opacity: 0.8,
-  bounds: {
-    southwest: { longitude: 110.273850, latitude: 25.088910 },
-    northeast: { longitude: 110.281229, latitude: 25.098995 }
-  }
+  opacity: 1,
+  coordinates: [
+    [108.187129, 23.1645811],
+    [108.195453, 23.1607256],
+    [108.1936792, 23.15581],
+    [108.1841647, 23.1592434]
+  ]
 };
-// 小程序 mapInfo.boundary uses GCJ-02. MapLibre and its raster tiles use WGS-84.
-const CAMPUS_MAP_BOUNDARY = {
-  southwest: { longitude: 110.272618, latitude: 25.088083 },
-  northeast: { longitude: 110.281911, latitude: 25.099580 }
-};
-const CAMPUS_MAP_MAX_BOUNDS = [
-  gcj02ToWgs84(CAMPUS_MAP_BOUNDARY.southwest),
-  gcj02ToWgs84(CAMPUS_MAP_BOUNDARY.northeast)
-].map(({ longitude, latitude }) => [
-  Number(longitude.toFixed(6)), Number(latitude.toFixed(6))
-]);
+// Restrict the initial map to the calibrated image envelope with a small pan margin.
+const CAMPUS_MAP_MAX_BOUNDS = [[108.1832, 23.1548], [108.1964, 23.1656]];
 const EMPTY_GJ = { type: 'FeatureCollection', features: [] };
 
 class MapView {
@@ -40,7 +33,7 @@ class MapView {
   }
 
   static create(container, {
-    center = [110.273130, 25.096525],
+    center = [108.1912479, 23.1598575],
     zoom = 16.1,
     minZoom = 16,
     maxBounds = CAMPUS_MAP_MAX_BOUNDS,

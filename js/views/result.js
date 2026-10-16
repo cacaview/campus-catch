@@ -2,14 +2,19 @@
 // wx→Web：canvasToTempFilePath→canvas.toBlob，saveImageToPhotosAlbum→a[download]，
 // onShareAppMessage→复制链接（?challenge=1&by=&team=），wx:if/wx:for→JS 渲染，
 // map 组件→MapLibre 封装，getStorageSync/setStorageSync→platform/storage
-import { navigate } from '../main.js?v=347ee3abc67c';
+import { navigate } from '../main.js?v=20261016audit1';
 import { showToast, setClipboardData } from '../platform/ui.js';
 import { getStorage, setStorage } from '../platform/storage.js';
-import { createMap } from '../lib/map.js?v=mapblend-20261003a';
+import { createMap } from '../lib/map.js?v=mapblend-20261008opacity1';
 import GameArea from '../utils/game-area.js';
 import { getStablePlayerId } from '../utils/player-identity.js';
 import { networkManager } from '../utils/network/network-manager.js';
 import { roomSession } from '../utils/network/room-session.js';
+
+const normalizeScore = value => typeof value === 'number' && Number.isFinite(value)
+  ? Math.max(0, Math.min(1_000_000, value)) : 0;
+
+const savedResults = new WeakSet();
 
 const RESULT_HTML = `
   <!-- 无结算数据空态：引导回首页开局，不展示任何 mock 战报 -->
@@ -117,7 +122,7 @@ export function create(rootEl, globalStateRef) {
       <span class="avatar">${p.team === 'cat' ? '🐱' : '🐭'}</span>
       <div class="p-info">
         <span class="p-name">${esc(p.name)}${p.id === s.myId ? ' <span class="tag">(我)</span>' : ''}</span>
-        <span class="p-score">${p.score} 分</span>
+        <span class="p-score">${normalizeScore(p.score)} 分</span>
       </div>
       ${p.isMVP ? '<span class="mvp-icon">👑</span>' : ''}
     </div>`;
@@ -353,8 +358,10 @@ export function create(rootEl, globalStateRef) {
 
   // 历史战绩（源 saveToHistory L310-322 原样）
   const saveToHistory = result => {
-    let history = getStorage('gameHistory') || [];
-    const players = (result.players || []).map(p => ({ ...p, team: String(p.team || '').toLowerCase() }));
+    if (savedResults.has(result)) return;
+    const storedHistory = getStorage('gameHistory');
+    let history = Array.isArray(storedHistory) ? storedHistory : [];
+    const players = (result.players || []).map(p => ({ ...p, score: normalizeScore(p.score), team: String(p.team || '').toLowerCase() }));
     history.push({
       date: new Date().getTime(),
       winner: String(result.winner || '').toLowerCase(),
@@ -362,6 +369,7 @@ export function create(rootEl, globalStateRef) {
     });
     if (history.length > 50) history = history.slice(-50);
     setStorage('gameHistory', history);
+    savedResults.add(result);
   };
 
   const formatTime = seconds => {

@@ -10,57 +10,54 @@ class WebSocketAdapter {
   }
 
   connect(url) {
+    this.disconnect();
     return new Promise((resolve, reject) => {
-      console.log('[WebSocketAdapter] Connecting to:', url);
-      this.disconnect();
-      let targetUrl = url;
-      if (!targetUrl.startsWith('ws://') && !targetUrl.startsWith('wss://')) targetUrl = 'wss://' + targetUrl;
-
+      let socket;
       let settled = false;
-      const settle = (fn, val) => {
+      const settle = (fn, value) => {
         if (settled) return;
         settled = true;
-        if (this._connectTimeout) {
-          clearTimeout(this._connectTimeout);
-          this._connectTimeout = null;
-        }
-        fn(val);
+        clearTimeout(this._connectTimeout);
+        this._connectTimeout = null;
+        this._cancelConnect = null;
+        fn(value);
       };
-      if (this._connectTimeout) clearTimeout(this._connectTimeout);
-      this._connectTimeout = setTimeout(() => {
-        settle(reject, new Error('连接超时（10 秒）：请检查地址是否正确、服务器是否已启动'));
-        try {
-          if (this.socket) this.socket.close();
-        } catch (e) {}
-      }, 10000);
-
+      this._cancelConnect = () => settle(reject, new Error('连接已取消'));
       try {
-        this.socket = new WebSocket(targetUrl);
-        this.socket.onopen = () => {
-          console.log('[WebSocketAdapter] Connected successfully');
+        let targetUrl = url;
+        if (!targetUrl.startsWith('ws://') && !targetUrl.startsWith('wss://')) targetUrl = 'wss://' + targetUrl;
+        socket = new WebSocket(targetUrl);
+        this.socket = socket;
+        const current = () => this.socket === socket;
+        this._connectTimeout = setTimeout(() => {
+          if (!current()) return;
+          settle(reject, new Error('连接超时（10 秒）：请检查地址是否正确、服务器是否已启动'));
+          this.disconnect();
+        }, 10000);
+        socket.onopen = () => {
+          if (!current()) return;
           this.isConnected = true;
-          if (this.onOpenCallback) this.onOpenCallback({});
           settle(resolve, true);
+          this.onOpenCallback?.({});
         };
-        this.socket.onmessage = (e) => {
-          if (this.onMessageCallback) this.onMessageCallback(e.data);
+        socket.onmessage = e => {
+          if (current()) this.onMessageCallback?.(e.data);
         };
-        this.socket.onerror = (e) => {
-          console.error('[WebSocketAdapter] Socket error:', e);
+        socket.onerror = e => {
+          if (!current()) return;
           this.isConnected = false;
-          if (this.onErrorCallback) this.onErrorCallback(e);
           settle(reject, new Error('连接失败：服务不可达（检查 wss:// 地址与服务器状态）'));
+          this.onErrorCallback?.(e);
         };
-        this.socket.onclose = (e) => {
-          console.log('[WebSocketAdapter] Socket closed:', e.code);
+        socket.onclose = e => {
+          if (!current()) return;
           this.isConnected = false;
-          if (this.onCloseCallback) this.onCloseCallback(e);
-          if (!settled) settle(reject, new Error('连接已关闭（服务可能未启动）'));
+          settle(reject, new Error('连接已关闭（服务可能未启动）'));
+          this.onCloseCallback?.(e);
         };
-      } catch (err) {
-        console.error('[WebSocketAdapter] Connection error:', err);
+      } catch (error) {
         this.isConnected = false;
-        settle(reject, err);
+        settle(reject, error);
       }
     });
   }
@@ -80,6 +77,9 @@ class WebSocketAdapter {
   }
 
   disconnect() {
+    this._cancelConnect?.();
+    clearTimeout(this._connectTimeout);
+    this._connectTimeout = null;
     if (this.socket) {
       // 主动断开：先摘掉事件回调，close 回调不再当「意外断开」上报（否则触发重连循环）
       const s = this.socket;

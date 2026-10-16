@@ -20,7 +20,9 @@ export function createRelayServer({
   publicIp,
   turnSecret = process.env.TURN_SECRET,
   now = Date.now,
-  maxPayloadBytes = 65536
+  maxPayloadBytes = 65536,
+  maxConnections = 512,
+  maxMessagesPerSecond = 240
 } = {}) {
   const registry = new RoomRegistry({ now });
   const httpServer = createServer((request, response) => {
@@ -75,8 +77,24 @@ export function createRelayServer({
   });
 
   webSocketServer.on('connection', ws => {
+    // Even capacity-rejected sockets can emit a receiver error while closing.
+    ws.on('error', () => registry.removeConnection(ws));
+    if (webSocketServer.clients.size > maxConnections) {
+      ws.terminate();
+      return;
+    }
     registry.onConnection(ws);
+    let windowAt = now();
+    let windowMessages = 0;
     ws.on('message', (data, isBinary) => {
+      if (now() - windowAt >= 1000) {
+        windowAt = now();
+        windowMessages = 0;
+      }
+      if (++windowMessages > maxMessagesPerSecond) {
+        ws.close(1008, 'Message rate exceeded');
+        return;
+      }
       if (isBinary) {
         ws.close(1003, 'Text messages only');
         return;
@@ -84,14 +102,13 @@ export function createRelayServer({
       let packet;
       try {
         packet = JSON.parse(data.toString('utf8'));
+        registry.handlePacket(ws, packet);
       } catch {
         ws.close(1007, 'Invalid JSON');
         return;
       }
-      registry.handlePacket(ws, packet);
     });
     ws.on('close', () => registry.removeConnection(ws));
-    ws.on('error', () => registry.removeConnection(ws));
   });
 
   let closing;

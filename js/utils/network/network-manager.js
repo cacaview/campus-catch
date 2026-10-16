@@ -26,6 +26,8 @@ export class NetworkManager {
     this.mode = NET_MODE.OFFLINE;
     this.wsAdapter = new WebSocketAdapter();
 
+    this._generation = 0;
+    this._connection = null;
     this.targetUrl = '';
     this.passcode = '';
 
@@ -52,7 +54,6 @@ export class NetworkManager {
     this.wsAdapter.onOpenCallback = () => {
       console.log('[NetworkManager] Connected!');
       this._setState(NET_STATE.CONNECTED);
-      this.reconnectAttempts = 0;
       this.missedPings = 0;
       this.startHeartbeat();
     };
@@ -68,6 +69,10 @@ export class NetworkManager {
 
     this.wsAdapter.onCloseCallback = (res) => {
       console.log('[NetworkManager] Socket close:', res);
+      if (res?.code === 4001 || res?.code === 4003) {
+        this.disconnect();
+        return;
+      }
       this.handleDisconnect('Socket closed');
     };
   }
@@ -87,23 +92,39 @@ export class NetworkManager {
    * 服务器模式 (Server Mode)
    */
   connectServer(serverUrl, playerInfo, passcode = '8888', gameArea = null, gameDurationSeconds = 600, options = {}) {
+    if (!options.reconnect) {
+      this._generation++;
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.stopHeartbeat();
+    }
+    const generation = this._generation;
+    const context = JSON.stringify([serverUrl, String(passcode), String(playerInfo?.id)]);
+    if (options.createIfMissingRoom === true) roomSession.clearReconnectToken();
+    const reconnectToken = roomSession.restoreReconnectToken(context);
+    this._connection = { serverUrl, playerInfo, passcode, gameArea, gameDurationSeconds, context, catchMode: options.catchMode };
     this.mode = NET_MODE.SERVER;
     this.targetUrl = serverUrl;
     this.passcode = passcode;
     this._setState(NET_STATE.CONNECTING);
 
     return this.wsAdapter.connect(serverUrl).then(() => {
+      if (generation !== this._generation || this.mode !== NET_MODE.SERVER) return;
       this.send(MSG_TYPES.JOIN_ROOM, {
         passcode,
         player: playerInfo,
         gameArea,
         gameDurationSeconds,
         createIfMissingRoom: options.createIfMissingRoom === true,
-        catchMode: options.catchMode
+        catchMode: options.catchMode,
+        ...(reconnectToken ? { reconnectToken } : {})
       });
     }).catch(err => {
-      console.error('[NetworkManager] Server connect failed:', err);
-      this._setState(NET_STATE.DISCONNECTED);
+      if (generation === this._generation && this.mode === NET_MODE.SERVER) {
+        this.stopHeartbeat();
+        this._setState(NET_STATE.DISCONNECTED);
+        if (options.reconnect) this.triggerAutoReconnect();
+      }
       throw err;
     });
   }
@@ -147,7 +168,18 @@ export class NetworkManager {
         break;
       case MSG_TYPES.JOIN_ACK:
         if (packet.payload.success) {
+          this.reconnectAttempts = 0;
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
           roomSession.applyJoinAck(packet.payload, packet.timestamp);
+          if (this._connection) {
+            this._connection = {
+              ...this._connection,
+              gameArea: roomSession.gameArea,
+              gameDurationSeconds: roomSession.gameDurationSeconds,
+              catchMode: roomSession.catchMode
+            };
+          }
           console.log('[NetworkManager] Joined room successfully!');
           this.emit('joinSuccess', packet.payload);
         } else {
@@ -183,6 +215,7 @@ export class NetworkManager {
    * 发送消息
    */
   send(type, payload = {}) {
+    if (type === MSG_TYPES.LEAVE_ROOM) roomSession.clearReconnectToken();
     if (this.mode === NET_MODE.OFFLINE || this.state !== NET_STATE.CONNECTED) {
       return false; // 单机或未连接时不发送，不触发警告控制台日志
     }
@@ -224,7 +257,7 @@ export class NetworkManager {
    */
   handleDisconnect(reason) {
     this.stopHeartbeat();
-    if (this.state === NET_STATE.CONNECTED || this.state === NET_STATE.CONNECTING) {
+    if (this.state === NET_STATE.CONNECTED) {
       console.warn(`[NetworkManager] Disconnected due to: ${reason}`);
       this.triggerAutoReconnect();
     }
@@ -234,31 +267,25 @@ export class NetworkManager {
    * 自动重连 (带指数退避策略：1s, 2s, 4s, 8s, 16s)
    */
   triggerAutoReconnect() {
-    if (this.mode === NET_MODE.OFFLINE) return;
-
+    if (this.mode === NET_MODE.OFFLINE || this.reconnectTimer || !this._connection) return;
+    this.stopHeartbeat();
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[NetworkManager] Max reconnect attempts reached');
+      this.wsAdapter.disconnect();
       this._setState(NET_STATE.DISCONNECTED);
       this.emit('reconnectFailed');
       return;
     }
-
-    this.reconnectAttempts++;
     this._setState(NET_STATE.RECONNECTING);
-
+    this.reconnectAttempts++;
     const delay = Math.pow(2, this.reconnectAttempts - 1) * 1000;
-    console.log(`[NetworkManager] Reconnecting attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
-
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-
+    const generation = this._generation;
+    const request = this._connection;
     this.reconnectTimer = setTimeout(() => {
-      this.connectServer(
-        this.targetUrl,
-        roomSession.myPlayer,
-        roomSession.passcode,
-        roomSession.gameArea,
-        roomSession.gameDurationSeconds
-      );
+      this.reconnectTimer = null;
+      if (generation !== this._generation || this.mode !== NET_MODE.SERVER || this._connection !== request) return;
+      this.connectServer(request.serverUrl, request.playerInfo, request.passcode,
+        request.gameArea, request.gameDurationSeconds, { reconnect: true, catchMode: request.catchMode })
+        .catch(() => {}); // connectServer schedules the next bounded attempt.
     }, delay);
   }
 
@@ -266,8 +293,11 @@ export class NetworkManager {
    * 主动断开连接
    */
   disconnect() {
+    roomSession.clearReconnectToken();
+    this._generation++;
     this.stopHeartbeat();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.mode = NET_MODE.OFFLINE;
     this.reconnectAttempts = 0;
     // 先置状态再关 socket：close 回调（可能同步触发）不应再触发重连

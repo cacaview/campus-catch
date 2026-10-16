@@ -1,8 +1,8 @@
 // js/views/home.js — 首页（源 pages/index/index.js 727 行移植，Web 版裁剪：删 LAN/扫码/二维码，服务器模式走 wss）
-import { navigate, DEFAULT_CENTER, parseQueryParams } from '../main.js?v=347ee3abc67c';
+import { navigate, DEFAULT_CENTER, parseQueryParams } from '../main.js?v=20261016audit1';
 import { getStorage, setStorage } from '../platform/storage.js';
 import { showToast, showModal, showLoading, hideLoading, setClipboardData } from '../platform/ui.js';
-import { createMap } from '../lib/map.js?v=mapblend-20261003a';
+import { createMap } from '../lib/map.js?v=mapblend-20261008opacity1';
 import { achievementManager } from '../utils/achievement.js';
 import { shopManager } from '../utils/shop.js';
 import GameArea from '../utils/game-area.js?v=mapfix-20261003a';
@@ -13,6 +13,7 @@ import { roomSession } from '../utils/network/room-session.js';
 import { DEFAULT_RELAY_URL } from '../config.js';
 
 const LEGACY_CAMPUS_CENTER = { latitude: 25.238236, longitude: 110.284419 };
+const PREVIOUS_CAMPUS_CENTER = { latitude: 25.096525, longitude: 110.273130 };
 
 const GUIDE_SLIDES = [
   {
@@ -377,7 +378,8 @@ export function create(rootEl, globalStateRef) {
     if (Number.isFinite(Number(cfg.durationMinutes))) durationMinutes = Math.max(1, Math.min(120, Number(cfg.durationMinutes)));
     if (Array.isArray(cfg.areaRawPoints) && cfg.areaRawPoints.length >= 3) {
       const restored = cfg.areaRawPoints;
-      const migrated = GameArea.rebasePoints(restored, LEGACY_CAMPUS_CENTER, DEFAULT_CENTER);
+      const olderMigration = GameArea.rebasePoints(restored, LEGACY_CAMPUS_CENTER, DEFAULT_CENTER);
+      const migrated = GameArea.rebasePoints(olderMigration, PREVIOUS_CAMPUS_CENTER, DEFAULT_CENTER);
       rawPoints = migrated.slice();
       if (migrated !== restored) saveConfig();
     }
@@ -488,7 +490,7 @@ export function create(rootEl, globalStateRef) {
       showToast({ title: '请先选择队伍并输入昵称', icon: 'none' });
       return;
     }
-    globalStateRef.currentPlayer = { id: getStablePlayerId(), name: nickname, team: selectedTeam, score: 0 };
+    globalStateRef.currentPlayer = { id: getStablePlayerId(), name: nickname, team: selectedTeam, score: 0, skillBonus: Math.min(10, shopManager.getOwned('extra_skill') || 0), startShield: shopManager.getOwned('start_shield') > 0 };
     globalStateRef.netMode = netMode;
     if (areaReady) {
       globalStateRef.gameArea = { type: 'polygon', points: areaPoints };
@@ -536,6 +538,7 @@ export function create(rootEl, globalStateRef) {
       joinFlowPending = false;
       clearJoinWatchdog();
       hideLoading();
+      if (roomSession.myPlayer) globalStateRef.currentPlayer = roomSession.myPlayer;
       globalStateRef.gameArea = roomSession.gameArea;
       globalStateRef.gameDurationSeconds = roomSession.gameDurationSeconds;
       showToast({
@@ -570,7 +573,7 @@ export function create(rootEl, globalStateRef) {
     serverUrl = url;
 
     const passcode = Protocol.generatePasscode();
-    const playerInfo = { id: getStablePlayerId(), name: nickname, team: selectedTeam, score: 0 };
+    const playerInfo = { id: getStablePlayerId(), name: nickname, team: selectedTeam, score: 0, skillBonus: Math.min(10, shopManager.getOwned('extra_skill') || 0), startShield: shopManager.getOwned('start_shield') > 0 };
     const gameArea = { type: 'polygon', points: areaPoints };
     const gameDurationSeconds = durationMinutes * 60;
 
@@ -641,7 +644,7 @@ export function create(rootEl, globalStateRef) {
       id: getStablePlayerId(),
       name: nickname,
       team: selectedTeam,
-      score: 0,
+      score: 0, skillBonus: Math.min(10, shopManager.getOwned('extra_skill') || 0), startShield: shopManager.getOwned('start_shield') > 0,
       state: 'IDLE',
       isMVP: false
     };

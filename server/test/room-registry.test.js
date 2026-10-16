@@ -90,7 +90,7 @@ test('reconnecting sole room member keeps the room registered', () => {
   const registry = new RoomRegistry();
   const original = joined(registry, 'same-player', '1234');
 
-  const reconnected = joined(registry, 'same-player', '1234');
+  const reconnected = joined(registry, 'same-player', '1234', 'cat', false, { reconnectToken: original.packets('JOIN_ACK')[0].payload.reconnectToken });
   const nextPlayer = joined(registry, 'next-player', '1234', 'mouse');
 
   assert.equal(original.readyState, 3);
@@ -99,44 +99,48 @@ test('reconnecting sole room member keeps the room registered', () => {
   assert.equal(reconnected.packets('PLAYER_LEFT').length, 0);
 });
 
-test('forwardsExistingGameplayPacketsWithinRoom', () => {
-  const registry = new RoomRegistry();
+test('forwards validated gameplay only within the started room', () => {
+  let now = 0;
+  const registry = new RoomRegistry({ now: () => now });
   const sender = joined(registry, 'sender');
   const sameRoom = joined(registry, 'same-room');
   const otherRoom = joined(registry, 'other-room', '9999');
-  const gameplayTypes = [
-    'SYNC_ROOM_STATE', 'PLAYER_MOVE', 'USE_SKILL', 'GAME_PAUSE',
-    'GAME_EXTEND', 'PLAYER_KICK', 'RECONNECT', 'RECONNECT_ACK'
+  registry.handlePacket(sender, packet('ROOM_START_REQUEST'));
+  now = 3000;
+  const cases = [
+    ['SYNC_ROOM_STATE', { remainingTime: 550 }, { remainingTime: 550, paused: false }],
+    ['PLAYER_MOVE', { latitude: 23.16, longitude: 108.19, score: 3 }, { id: 'sender', name: 'Player sender', team: 'cat', latitude: 23.16, longitude: 108.19, score: 3, stealthActive: false, disguiseActive: false, decoyPosition: null }],
+    ['USE_SKILL', { skillId: 'cat_radar' }, { skillId: 'cat_radar', playerId: 'sender', playerName: 'Player sender' }],
+    ['GAME_PAUSE', { paused: false }, { paused: false }],
+    ['GAME_EXTEND', { seconds: 300 }, { seconds: 300 }],
+    ['RECONNECT', {}, {}]
   ];
-
-  for (const type of gameplayTypes) {
-    sameRoom.clear();
-    otherRoom.clear();
-    const payload = { marker: type };
+  for (const [type, payload, expected] of cases) {
+    sameRoom.clear(); otherRoom.clear();
     registry.handlePacket(sender, packet(type, payload, 'spoofed-id'));
-    assert.deepEqual(sameRoom.packets(type)[0]?.payload, payload, `${type} reaches same room`);
-    assert.equal(otherRoom.packets(type).length, 0, `${type} stays in room`);
+    assert.deepEqual(sameRoom.packets(type)[0]?.payload, expected);
+    assert.equal(sameRoom.packets(type)[0]?.senderId, 'sender');
+    assert.equal(otherRoom.packets(type).length, 0);
   }
 });
 
-test('broadcasts a map-item pickup once to the started room', () => {
-  const registry = new RoomRegistry();
+test('broadcasts a valid nearby map-item pickup once to the started room', () => {
+  let now = 0;
+  const registry = new RoomRegistry({ now: () => now });
   const picker = joined(registry, 'picker');
   const teammate = joined(registry, 'teammate', '1234', 'mouse');
   const otherRoom = joined(registry, 'other-room', '9999');
   registry.handlePacket(picker, packet('ROOM_START_REQUEST'));
+  now = 3000;
+  const item = registry.rooms.get('1234').mapItems.items.find(i => i.type === 'CATNIP');
+  registry.handlePacket(picker, packet('PLAYER_MOVE', { latitude: item.latitude, longitude: item.longitude }));
   for (const socket of [picker, teammate, otherRoom]) socket.clear();
-
-  registry.handlePacket(picker, packet('MAP_ITEM_PICKUP', { itemId: 2001 }, 'spoofed-id'));
-  registry.handlePacket(picker, packet('MAP_ITEM_PICKUP', { itemId: 2001 }, 'spoofed-id'));
-
+  registry.handlePacket(picker, packet('MAP_ITEM_PICKUP', { itemId: item.id }, 'spoofed-id'));
+  registry.handlePacket(picker, packet('MAP_ITEM_PICKUP', { itemId: item.id }, 'spoofed-id'));
   assert.equal(picker.packets('MAP_ITEM_PICKUP').length, 1);
   assert.equal(teammate.packets('MAP_ITEM_PICKUP').length, 1);
   assert.equal(otherRoom.packets('MAP_ITEM_PICKUP').length, 0);
-  assert.deepEqual(teammate.packets('MAP_ITEM_PICKUP')[0].payload, {
-    itemId: 2001,
-    playerId: 'picker'
-  });
+  assert.deepEqual(teammate.packets('MAP_ITEM_PICKUP')[0].payload, { itemId: item.id, playerId: 'picker' });
   assert.equal(teammate.packets('MAP_ITEM_PICKUP')[0].senderId, 'picker');
 });
 
@@ -317,7 +321,7 @@ test('rejectsLateJoinButAllowsKnownPlayerReconnect', () => {
   assert.equal(late.packets('JOIN_ACK').at(-1)?.payload.success, false);
   assert.match(late.packets('JOIN_ACK').at(-1)?.payload.reason, /活动已开始/);
 
-  const reconnectedGuest = joined(registry, 'guest');
+  const reconnectedGuest = joined(registry, 'guest', '1234', 'cat', false, { reconnectToken: guest.packets('JOIN_ACK')[0].payload.reconnectToken });
   const reconnectAck = reconnectedGuest.packets('JOIN_ACK').at(-1)?.payload;
   assert.equal(reconnectAck.success, true);
   assert.equal(reconnectAck.phase, 'STARTED');
@@ -339,7 +343,7 @@ test('retains an empty started room for known reconnects, then expires it', () =
   registry.removeConnection(guest);
   assert.equal(registry.rooms.get('1234').phase, 'STARTED');
 
-  const reconnectedGuest = joined(registry, 'guest');
+  const reconnectedGuest = joined(registry, 'guest', '1234', 'cat', false, { reconnectToken: guest.packets('JOIN_ACK')[0].payload.reconnectToken });
   const reconnectAck = reconnectedGuest.packets('JOIN_ACK').at(-1)?.payload;
   assert.equal(reconnectAck.success, true);
   assert.equal(reconnectAck.phase, 'STARTED');
@@ -383,11 +387,12 @@ const BASE_LNG = 108.1912479;
 const metersToDeg = meters => meters / 111320;
 
 function startedCatchRoom(extra = {}) {
-  let now = 0;
+  let now = -3000;
   const registry = new RoomRegistry({ now: () => now });
   const cat = joined(registry, 'cat1', '1234', 'cat', true, extra);
   const mouse = joined(registry, 'mouse1', '1234', 'mouse');
   registry.handlePacket(cat, packet('ROOM_START_REQUEST'));
+  now = 0;
   for (const socket of [cat, mouse]) socket.clear();
   const move = (ws, latitude, longitude) =>
     registry.handlePacket(ws, packet('PLAYER_MOVE', { latitude, longitude }));

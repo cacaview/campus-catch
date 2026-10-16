@@ -38,6 +38,13 @@ export function gcj02ToWgs84({ latitude, longitude }) {
 
 /** Adapt wx MapContext.addGroundOverlay bounds into a MapLibre image source. */
 export function miniProgramGroundOverlayToMapLibre(overlay) {
+  if (Array.isArray(overlay.coordinates) && overlay.coordinates.length === 4) {
+    return {
+      url: overlay.src,
+      coordinates: overlay.coordinates.map(point => [Number(point[0]), Number(point[1])]),
+      opacity: overlay.opacity
+    };
+  }
   const { southwest, northeast } = overlay.bounds;
   const gcjCorners = [
     { latitude: northeast.latitude, longitude: southwest.longitude },

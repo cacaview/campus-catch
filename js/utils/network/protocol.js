@@ -67,12 +67,13 @@ export class Protocol {
    */
   static decode(rawMsg) {
     try {
-      if (typeof rawMsg !== 'string') {
-        rawMsg = String(rawMsg);
-      }
-      return JSON.parse(rawMsg);
+      if (typeof rawMsg !== 'string') return null;
+      const packet = JSON.parse(rawMsg);
+      if (!packet || typeof packet !== 'object' || Array.isArray(packet) || typeof packet.type !== 'string') return null;
+      if (!packet.payload || typeof packet.payload !== 'object' || Array.isArray(packet.payload)) return null;
+      return packet;
     } catch (err) {
-      console.error('[Protocol] Decode error:', err, rawMsg);
+      // Invalid transport data is ignored without logging private packet contents.
       return null;
     }
   }

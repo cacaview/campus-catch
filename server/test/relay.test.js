@@ -50,3 +50,36 @@ test('rejectsMalformedAndOversizedPackets', async t => {
   oversized.send('x'.repeat(128));
   assert.equal((await oversizedClose).code, 1009);
 });
+
+test('semantic malformed numeric fields cannot stop other clients or health endpoint', async t => {
+  const relay = await startRelay(); t.after(() => relay.close());
+  const socket = new WebSocket(relay.wsUrl);
+  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  socket.send(JSON.stringify({ type: 'MAP_ITEM_PICKUP', payload: { itemId: { toString: null } } }));
+  const pong = new Promise(resolve => socket.once('message', raw => resolve(JSON.parse(raw))));
+  socket.send(JSON.stringify({ type: 'PING', payload: {} }));
+  assert.equal((await pong).type, 'PONG');
+  assert.equal((await fetch(`${relay.baseUrl}/healthz`)).status, 200);
+  socket.close();
+});
+
+test('per-socket message budget closes flooders without stopping relay', async t => {
+  const relay = await startRelay({ maxMessagesPerSecond: 2 }); t.after(() => relay.close());
+  const socket = new WebSocket(relay.wsUrl);
+  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  const closed = new Promise(resolve => socket.once('close', code => resolve(code)));
+  for (let i = 0; i < 3; i++) socket.send(JSON.stringify({ type: 'PING', payload: {} }));
+  assert.equal(await closed, 1008);
+  assert.equal((await fetch(`${relay.baseUrl}/healthz`)).status, 200);
+});
+
+test('capacity-rejected sockets retain error handling while closing', async t => {
+  const relay = await startRelay({ maxConnections: 0 }); t.after(() => relay.close());
+  const accepted = new Promise(resolve => relay.webSocketServer.once('connection', resolve));
+  const socket = new WebSocket(relay.wsUrl);
+  socket.on('error', () => {});
+  const rejected = await accepted;
+  assert.doesNotThrow(() => rejected.emit('error', new Error('Malformed frame while closing')));
+  assert.equal((await fetch(`${relay.baseUrl}/healthz`)).status, 200);
+  socket.terminate();
+});

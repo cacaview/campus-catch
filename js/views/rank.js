@@ -1,7 +1,10 @@
 // js/views/rank.js — 排行榜视图（源 pages/rank/rank.js 135 行逻辑全保留）
 // wx→Web：getStorageSync→getStorage，setData→状态+渲染，wx:for/wx:if→JS 渲染
-import { navigate } from '../main.js?v=347ee3abc67c';
+import { navigate } from '../main.js?v=20261016audit1';
 import { getStorage } from '../platform/storage.js';
+
+const normalizeScore = value => typeof value === 'number' && Number.isFinite(value)
+  ? Math.max(0, Math.min(1_000_000, value)) : 0;
 
 // 时间范围：本周榜 / 本月榜 / 总榜
 const PERIODS = {
@@ -72,7 +75,7 @@ export function create(rootEl, globalStateRef) {
     $('rank-my-bar').hidden = !show;
     if (show) {
       const periodWord = s.period === 'week' ? '周' : (s.period === 'month' ? '月' : '榜');
-      $('rank-my-bar').innerHTML = `🔖 ${esc(s.myName || '我')}：本${periodWord}第 <span class="my-rank-num">${s.myRank}</span> 名 · 共 ${s.myScore} 分`;
+      $('rank-my-bar').innerHTML = `🔖 ${esc(s.myName || '我')}：本${periodWord}第 <span class="my-rank-num">${s.myRank}</span> 名 · 共 ${normalizeScore(s.myScore)} 分`;
     }
   };
 
@@ -87,7 +90,7 @@ export function create(rootEl, globalStateRef) {
         <span class="stats">场次: ${p.games} | 胜率: ${p.winRate}%</span>
       </div>
       <div class="score">
-        <span class="score-val">${p.totalScore}</span>
+        <span class="score-val">${normalizeScore(p.totalScore)}</span>
         <span class="score-label">总分</span>
       </div>
     </div>`;
@@ -105,7 +108,8 @@ export function create(rootEl, globalStateRef) {
   /* ---------- 数据（源 loadRankData 原样移植） ---------- */
 
   const loadRankData = () => {
-    const history = getStorage('gameHistory') || [];
+    const storedHistory = getStorage('gameHistory');
+    const history = Array.isArray(storedHistory) ? storedHistory : [];
     const isAI = p => /^(AI|电脑)/i.test(String(p.name || '')) || /^\d+$/.test(String(p.id ?? ''));
 
     // 周榜/月榜：按对局日期过滤（旧记录无 date 字段时视为不计入周期榜）
@@ -138,7 +142,7 @@ export function create(rootEl, globalStateRef) {
         }
 
         const stat = playerStats[key];
-        stat.totalScore += p.score;
+        stat.totalScore = normalizeScore(stat.totalScore + normalizeScore(p.score));
         stat.games += 1;
         if (game.winner === p.team || game.winner === team) {
           stat.wins += 1;

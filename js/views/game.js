@@ -1,10 +1,10 @@
 // js/views/game.js — 游戏视图（源 pages/game/game.js 1286 行移植）
 // Web 版恢复房间聊天与 WebRTC 语音；wx→platform：定位与地图走浏览器适配层
 // wx→platform：getLocation→geo，showModal/showActionSheet→ui（Promise 化），地图→MapLibre 封装
-import { navigate, DEFAULT_CENTER } from '../main.js?v=347ee3abc67c';
+import { navigate, DEFAULT_CENTER } from '../main.js?v=20261016audit1';
 import { showToast, showModal, showActionSheet } from '../platform/ui.js';
 import { getLocation, startLocationUpdate, stopLocationUpdate } from '../platform/geo.js';
-import { createMap } from '../lib/map.js?v=mapblend-20261003a';
+import { createMap } from '../lib/map.js?v=mapblend-20261008opacity1';
 import { networkManager } from '../utils/network/network-manager.js';
 import { roomSession } from '../utils/network/room-session.js';
 import { MSG_TYPES } from '../utils/network/protocol.js';
@@ -18,6 +18,13 @@ import GameArea from '../utils/game-area.js';
 import AIPlayerController from '../utils/ai-player.js';
 import { getStorage } from '../platform/storage.js';
 
+const normalizeScore = value => typeof value === 'number' && Number.isFinite(value)
+  ? Math.max(0, Math.min(1_000_000, value)) : 0;
+
+const isValidPosition = position => position && typeof position === 'object' && !Array.isArray(position) &&
+  typeof position.latitude === 'number' && Number.isFinite(position.latitude) && Math.abs(position.latitude) <= 90 &&
+  typeof position.longitude === 'number' && Number.isFinite(position.longitude) && Math.abs(position.longitude) <= 180;
+
 const ITEM_COLORS = {
   [ITEM_TYPES.CHEESE]: '#ffa500',
   [ITEM_TYPES.CATNIP]: '#4cd137',
@@ -27,6 +34,9 @@ const ITEM_COLORS = {
 
 // 抓捕判定方式：instant = 进入范围立即判定（源逻辑）；sustained = 连续保持范围 3 秒自动抓捕（默认，与联机中继一致）
 const CATCH_PROXIMITY_MS = 3000;
+const TRAP_DURATION_MS = 3000;
+const BUSH_DURATION_MS = 5000;
+const CATNIP_XRAY_MS = 5000;
 
 const GAME_HTML = `
   <div id="game-map"></div>
@@ -194,6 +204,7 @@ export function create(rootEl, globalStateRef) {
     xrayUntil: 0,
     decoyUntil: 0,
     radarUntil: 0,
+    trapUntil: 0,
     satellite: false, // 与地图默认一致：校园图
     scanUntil: 0,
     showRankModal: false,
@@ -203,6 +214,9 @@ export function create(rootEl, globalStateRef) {
   };
 
   /* ---------- 实例字段（源 this._xxx） ---------- */
+  let viewActive = false;
+  let viewGeneration = 0;
+  let locationWatchStarted = false;
   let map = null;
   let aiPlayers = [];
   const pendingMapItemPickups = new Set();
@@ -222,6 +236,7 @@ export function create(rootEl, globalStateRef) {
   let tickCount = 0;
   let lastSonarAt = 0;
   let catchCdUntil = 0;
+  let catchOverlayTimer = null;
   let hasRealLocation = false;
   let lastLat = null;
   let lastLng = null;
@@ -419,8 +434,11 @@ export function create(rootEl, globalStateRef) {
 
   const renderBoundary = () => { $('game-boundary').hidden = !s.isOutsideArea; };
 
+  const esc = value => String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
   const renderFeed = () => {
-    $('game-feed').innerHTML = s.battleFeed.map(m => `<div class="feed-item">${m.text}</div>`).join('');
+    $('game-feed').innerHTML = s.battleFeed.map(m => `<div class="feed-item">${esc(m.text)}</div>`).join('');
   };
 
   // 源 updateMarkers L756-851 → Web 标记形状
@@ -455,19 +473,32 @@ export function create(rootEl, globalStateRef) {
     (aiPlayers || []).forEach(p => {
       const pCat = p.team === 'cat';
       const enemy = pCat !== isCat;
-      const emoji = pCat ? '🐱' : '🐭';
-
       const highlight = (xrayOn && enemy) || (radarOn && enemy) || (scanOn && enemy);
-      markers.push({
-        id: 'player_' + p.id,
-        latitude: p.latitude,
-        longitude: p.longitude,
-        icon: emoji,
-        label: p.name,
-        sub: `${p.score}分${highlight ? '\n🎯 锁定' : ''}`,
-        color: highlight ? '#ffd700' : (pCat ? '#ff3366' : '#33ccff'),
-        highlight
-      });
+      const displayCat = pCat || (enemy && p.disguiseActive === true);
+      const emoji = displayCat ? '🐱' : '🐭';
+      const color = highlight ? '#ffd700' : (displayCat ? '#ff3366' : '#33ccff');
+      if (!enemy || p.stealthActive !== true || highlight) {
+        markers.push({
+          id: 'player_' + p.id,
+          latitude: p.latitude,
+          longitude: p.longitude,
+          icon: emoji,
+          label: p.name,
+          sub: `${p.score}分${highlight ? '\n🎯 锁定' : ''}`,
+          color,
+          highlight
+        });
+      }
+      if (isValidPosition(p.decoyPosition)) {
+        markers.push({
+          id: 'player_decoy_' + p.id,
+          latitude: p.decoyPosition.latitude,
+          longitude: p.decoyPosition.longitude,
+          icon: emoji,
+          label: p.name,
+          color
+        });
+      }
     });
 
     // 声东击西诱饵标记
@@ -550,8 +581,8 @@ export function create(rootEl, globalStateRef) {
         `<div class="rank-modal-row ${r.isMe ? 'me' : ''}">
            <span class="rk-num ${r.top3 ? 'top3' : ''}">${r.rank}</span>
            <span class="rk-avatar">${r.team === 'cat' ? '🐱' : '🐭'}</span>
-           <span class="rk-name">${r.name}${r.isMe ? '（我）' : ''}</span>
-           <span class="rk-score">${r.score} 分</span>
+           <span class="rk-name">${esc(r.name)}${r.isMe ? '（我）' : ''}</span>
+           <span class="rk-score">${normalizeScore(r.score)} 分</span>
          </div>`).join('');
       $('game-rank-tip').hidden = (s.scanUntil || 0) <= Date.now();
     }
@@ -623,7 +654,27 @@ export function create(rootEl, globalStateRef) {
       renderMarkers();
     };
 
+    netHandlers.playerLeft = () => refreshRemoteRoster();
+    netHandlers.hostChanged = () => {
+      s.isHost = roomSession.isHost === true;
+      refreshRemoteRoster();
+      renderPhase();
+      if (!s.isHost) networkManager.send(MSG_TYPES.RECONNECT, { reason: 'sync-timer' });
+    };
+
     netHandlers.joinSuccess = () => {
+      const self = roomSession.myPlayer || roomSession.members.find(member =>
+        String(member.id) === String(globalStateRef.currentPlayer?.id)
+      );
+      if (self) {
+        roomSession.myPlayer = { ...self };
+        globalStateRef.currentPlayer = roomSession.myPlayer;
+      }
+      if (roomSession.paused !== s.isPaused) applyRoomPauseState(roomSession.paused === true);
+      s.isHost = roomSession.isHost === true;
+      refreshRemoteRoster();
+      renderPhase();
+      if (!s.isHost) networkManager.send(MSG_TYPES.RECONNECT, { reason: 'sync-timer' });
       // A reconnecting client gets the relay's authoritative picked-item list
       // in JOIN_ACK and removes those items from its deterministic local set.
       let changed = false;
@@ -658,10 +709,22 @@ export function create(rootEl, globalStateRef) {
       if (payload && payload.sender) addChatMessage(payload.sender, payload.text);
     };
 
-    netHandlers.gamePause = payload => {
-      if (payload && typeof payload.paused === 'boolean' && payload.paused !== s.isPaused) {
-        setPaused(payload.paused, true);
+    const applyRoomPauseState = paused => {
+      roomSession.paused = paused;
+      if (paused && s.gamePhase === 'COUNTDOWN') {
+        if (countdownTimer) clearInterval(countdownTimer);
+        countdownTimer = null;
+        s.gamePhase = 'PAUSED';
+        s.isPaused = true;
+        renderPhase();
+        addSystemMessage('⏸ 房主暂停了活动');
+      } else if (paused !== s.isPaused) {
+        setPaused(paused, true);
       }
+    };
+
+    netHandlers.gamePause = payload => {
+      if (payload && typeof payload.paused === 'boolean') applyRoomPauseState(payload.paused);
     };
 
     netHandlers.gameExtend = payload => {
@@ -701,11 +764,15 @@ export function create(rootEl, globalStateRef) {
       if (totalDuration < s.remainingTime) totalDuration = s.remainingTime;
       s.timerText = formatTime(s.remainingTime);
       renderHud();
+      if (typeof payload.paused === 'boolean') applyRoomPauseState(payload.paused);
       addSystemMessage('⏱ 已与房主对齐活动剩余时间');
     };
 
     networkManager.on('stateChange', netHandlers.stateChange);
     networkManager.on(MSG_TYPES.PLAYER_MOVE, netHandlers.playerMove);
+    networkManager.on(MSG_TYPES.PLAYER_LEFT, netHandlers.playerLeft);
+    networkManager.on(MSG_TYPES.PLAYER_JOINED, netHandlers.playerLeft);
+    networkManager.on(MSG_TYPES.ROOM_HOST_CHANGED, netHandlers.hostChanged);
     networkManager.on(MSG_TYPES.MAP_ITEM_PICKUP, netHandlers.mapItemPickup);
     networkManager.on('joinSuccess', netHandlers.joinSuccess);
     networkManager.on(MSG_TYPES.CATCH_EVENT, netHandlers.catchEvent);
@@ -721,6 +788,11 @@ export function create(rootEl, globalStateRef) {
   const removeNetworkListeners = () => {
     if (netHandlers.stateChange) networkManager.off('stateChange', netHandlers.stateChange);
     if (netHandlers.playerMove) networkManager.off(MSG_TYPES.PLAYER_MOVE, netHandlers.playerMove);
+    if (netHandlers.playerLeft) {
+      networkManager.off(MSG_TYPES.PLAYER_LEFT, netHandlers.playerLeft);
+      networkManager.off(MSG_TYPES.PLAYER_JOINED, netHandlers.playerLeft);
+    }
+    if (netHandlers.hostChanged) networkManager.off(MSG_TYPES.ROOM_HOST_CHANGED, netHandlers.hostChanged);
     if (netHandlers.mapItemPickup) networkManager.off(MSG_TYPES.MAP_ITEM_PICKUP, netHandlers.mapItemPickup);
     if (netHandlers.joinSuccess) networkManager.off('joinSuccess', netHandlers.joinSuccess);
     if (netHandlers.catchEvent) networkManager.off(MSG_TYPES.CATCH_EVENT, netHandlers.catchEvent);
@@ -734,25 +806,31 @@ export function create(rootEl, globalStateRef) {
     netHandlers = {};
   };
 
-  const updateRemotePlayerPosition = player => {
-    let found = false;
-    aiPlayers = (aiPlayers || []).map(p => {
-      if (p.id === player.id) {
-        found = true;
-        return { ...p, latitude: player.latitude, longitude: player.longitude, score: player.score || p.score };
-      }
-      return p;
+  const refreshRemoteRoster = () => {
+    const myId = String(globalStateRef.currentPlayer?.id ?? '');
+    aiPlayers = aiPlayers.flatMap(player => {
+      const member = roomSession.members.find(m => String(m.id) === String(player.id));
+      if (!member || String(member.id) === myId) return [];
+      return [{ ...player, id: String(member.id), name: member.name, team: member.team, score: normalizeScore(player.score) }];
     });
-    if (!found) {
-      aiPlayers.push({
-        id: player.id,
-        name: player.name || '联机玩家',
-        team: player.team || 'cat',
-        latitude: player.latitude,
-        longitude: player.longitude,
-        score: player.score || 0
-      });
-    }
+    renderMarkers();
+  };
+
+  const updateRemotePlayerPosition = player => {
+    const member = roomSession.members.find(m => String(m.id) === String(player.id));
+    if (!member || String(member.id) === String(globalStateRef.currentPlayer?.id)) return;
+    if (!isValidPosition(player)) return;
+    const remote = {
+      id: String(member.id), name: member.name, team: member.team,
+      latitude: player.latitude, longitude: player.longitude, score: normalizeScore(player.score),
+      stealthActive: player.stealthActive === true,
+      disguiseActive: player.disguiseActive === true,
+      decoyPosition: isValidPosition(player.decoyPosition)
+        ? { latitude: player.decoyPosition.latitude, longitude: player.decoyPosition.longitude } : null
+    };
+    const index = aiPlayers.findIndex(p => String(p.id) === remote.id);
+    if (index < 0) aiPlayers.push(remote);
+    else aiPlayers[index] = remote;
     renderMarkers();
   };
 
@@ -780,28 +858,37 @@ export function create(rootEl, globalStateRef) {
 
   // 源 startGame L563-599；Web：定位失败不再卡死，进入模拟移动模式
   const startGame = () => {
+    if (!viewActive || s.gamePhase === 'END') return;
+    const generation = viewGeneration;
     if (s.netMode === 'SERVER' && GameArea.isValidArea(gameArea) && !hasRealLocation) {
       beginPlaying();
       getLocation({
         success: loc => {
+          if (!viewActive || generation !== viewGeneration || s.gamePhase === 'END') return;
           hasRealLocation = true;
           if (simMovementTimer) clearInterval(simMovementTimer);
           simMovementTimer = null;
           applyLocation(loc);
           startLocationWatch();
         },
-        fail: () => showToast({ title: '未获取定位，进入模拟移动模式', icon: 'none' })
+        fail: () => {
+          if (viewActive && generation === viewGeneration && s.gamePhase !== 'END') {
+            showToast({ title: '未获取定位，进入模拟移动模式', icon: 'none' });
+          }
+        }
       });
       return;
     }
     if (GameArea.isValidArea(gameArea) && !hasRealLocation) {
       getLocation({
         success: loc => {
+          if (!viewActive || generation !== viewGeneration || s.gamePhase === 'END') return;
           hasRealLocation = true;
           applyLocation(loc);
           startGame();
         },
         fail: () => {
+          if (!viewActive || generation !== viewGeneration || s.gamePhase === 'END') return;
           // Web 桌面/无授权：无真实 GPS → 模拟移动继续（源微信版失败时停在 WAITING）
           showToast({ title: '未获取定位，进入模拟移动模式', icon: 'none' });
           beginPlaying();
@@ -813,6 +900,7 @@ export function create(rootEl, globalStateRef) {
   };
 
   const beginPlaying = () => {
+    if (!viewActive || s.gamePhase === 'PLAYING' || s.gamePhase === 'END') return;
     if (GameArea.isValidArea(gameArea) && !GameArea.contains(gameArea, { latitude: s.latitude, longitude: s.longitude })) {
       s.gamePhase = 'WAITING';
       s.isOutsideArea = true;
@@ -847,12 +935,16 @@ export function create(rootEl, globalStateRef) {
     countdownTimer = gameTimer = gameTickTimer = simMovementTimer = null;
     pendingTimers.forEach(id => clearTimeout(id));
     pendingTimers.length = 0;
+    catchOverlayTimer = null;
   };
 
   // 模拟移动（源 startLocationWatch fail 分支 L888-898）
   const startSimulatedMovement = () => {
+    if (!viewActive || simMovementTimer) return;
+    const generation = viewGeneration;
     console.warn('no real location, using simulated movement');
     simMovementTimer = setInterval(() => {
+      if (!viewActive || generation !== viewGeneration || s.gamePhase !== 'PLAYING' || s.isPaused || s.isOutsideArea) return;
       s.latitude += (Math.random() - 0.5) * 0.0001;
       s.longitude += (Math.random() - 0.5) * 0.0001;
       s.distance += Math.floor(Math.random() * 5);
@@ -864,12 +956,17 @@ export function create(rootEl, globalStateRef) {
 
   // 源 startLocationWatch L854-900 → Web：watchPosition 回调即定位流
   const startLocationWatch = () => {
+    if (!viewActive || locationWatchStarted || s.gamePhase === 'END') return;
+    const generation = viewGeneration;
     if (!hasRealLocation) {
       // 从未拿到真实定位（桌面/无授权）→ 直接模拟移动
       startSimulatedMovement();
       return;
     }
+    if (simMovementTimer) clearInterval(simMovementTimer);
+    simMovementTimer = null;
     const ok = startLocationUpdate(loc => {
+      if (!viewActive || generation !== viewGeneration || s.gamePhase === 'END') return;
       if (!hasRealLocation) hasRealLocation = true;
       if (lastLat != null && lastLng != null) {
         // Haversine 累计（源 L866-879 原样：1~150m 区间才计里程）
@@ -891,6 +988,7 @@ export function create(rootEl, globalStateRef) {
       lastLng = loc.longitude;
       applyLocation(loc);
     });
+    locationWatchStarted = ok;
     if (!ok) startSimulatedMovement();
   };
 
@@ -940,12 +1038,29 @@ export function create(rootEl, globalStateRef) {
       addSystemMessage(`🧀 真实打卡 [能量奶酪]，积分 +${pickGain}！`);
     } else if (pickedItem.type === 'CATNIP') {
       s.myScore += pickGain;
-      addSystemMessage(`🌿 拾取 [猫薄荷]，积分 +${pickGain}！`);
+      s.xrayUntil = Math.max(s.xrayUntil || 0, Date.now() + CATNIP_XRAY_MS);
+      addSystemMessage(`🌿 拾取 [猫薄荷]，积分 +${pickGain}，5 秒内高亮锁定全图敌人！`);
+      renderMarkers();
+      later(() => {
+        if (s.xrayUntil > Date.now()) return;
+        s.xrayUntil = 0;
+        renderMarkers();
+      }, CATNIP_XRAY_MS);
     } else if (pickedItem.type === 'TRAP') {
       soundVibration.playSound('trap_triggered');
-      addSystemMessage('🪤 警报！你踩中了 [捕鼠陷阱] 区域！广播暴露位置！');
+      s.trapUntil = Date.now() + TRAP_DURATION_MS;
+      addSystemMessage('🪤 警报！你踩中了 [捕鼠陷阱]，被困 3 秒且广播暴露位置！');
     } else if (pickedItem.type === 'BUSH') {
-      addSystemMessage('🌫️ 你进入了 [隐蔽草丛]，位置标记遮蔽');
+      s.isStealthActive = true;
+      s.stealthUntil = Math.max(s.stealthUntil || 0, Date.now() + BUSH_DURATION_MS);
+      addSystemMessage('🌫️ 你进入了 [隐蔽草丛]，位置标记隐藏 5 秒');
+      renderMarkers();
+      later(() => {
+        if (s.stealthUntil > Date.now()) return;
+        s.isStealthActive = false;
+        s.stealthUntil = 0;
+        renderMarkers();
+      }, BUSH_DURATION_MS);
     }
     renderHud();
   };
@@ -979,6 +1094,17 @@ export function create(rootEl, globalStateRef) {
 
   const gameTick = () => {
     if (s.isOutsideArea || s.isPaused) return;
+    if (s.netMode !== 'OFFLINE') {
+      networkManager.send(MSG_TYPES.PLAYER_MOVE, {
+        id: (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'player_1',
+        name: s.myName,
+        team: s.myTeam,
+        latitude: s.latitude,
+        longitude: s.longitude,
+        score: normalizeScore(s.myScore)
+      });
+    }
+
     let changed = false;
 
     const currentPos = { latitude: s.latitude, longitude: s.longitude };
@@ -1016,9 +1142,7 @@ export function create(rootEl, globalStateRef) {
         // 真实 GPS 物理接近抓捕检测（同阵营不触发；10 米范围内开始判定，方式可切换：即时 / 3 秒持续）
         const pCat = ai.team === 'cat';
         if (pCat === (s.myTeam === 'cat')) return;
-        const dLat = Math.abs(ai.latitude - s.latitude);
-        const dLng = Math.abs(ai.longitude - s.longitude);
-        const distApprox = Math.sqrt(dLat * dLat + dLng * dLng) * 111320;
+        const distApprox = GameArea.distanceMeters(currentPos, ai);
         let catchRadius = 10;
         let sonarOuter = 20;
         if ((s.myTeam === 'cat') && (s.radarUntil || 0) > Date.now()) {
@@ -1057,25 +1181,18 @@ export function create(rootEl, globalStateRef) {
       });
     }
 
-    if (s.netMode !== 'OFFLINE') {
-      networkManager.send(MSG_TYPES.PLAYER_MOVE, {
-        id: (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'player_1',
-        name: s.myName,
-        team: s.myTeam,
-        latitude: s.latitude,
-        longitude: s.longitude,
-        score: s.myScore
-      });
-    }
-
-    // 行为分：鼠存活 +2 / 猫巡逻 +1，每 30 秒一跳（源 L710-720 原样）
+    // 行为分：鼠存活 +2 / 猫巡逻 +1，每 30 秒一跳（被困期间不计分）
     tickCount = (tickCount || 0) + 1;
     if (tickCount % 20 === 0 && s.gamePhase === 'PLAYING') {
-      const myGain = s.myTeam === 'mouse' ? 2 : 1;
-      s.myScore += myGain;
-      (aiPlayers || []).forEach(ai => {
-        ai.score += ai.team === 'mouse' ? 2 : 1;
-      });
+      const trapped = (s.trapUntil || 0) > Date.now();
+      if (!trapped) {
+        s.myScore += s.myTeam === 'mouse' ? 2 : 1;
+      }
+      if (s.netMode === 'OFFLINE') {
+        (aiPlayers || []).forEach(ai => {
+          ai.score = normalizeScore(ai.score + (ai.team === 'mouse' ? 2 : 1));
+        });
+      }
       renderHud();
       changed = true;
     }
@@ -1114,7 +1231,9 @@ export function create(rootEl, globalStateRef) {
 
   const applyShopItems = teamSkills => {
     try {
-      const extraPacks = shopManager.getOwned('extra_skill');
+      const ownedPacks = shopManager.getOwned('extra_skill');
+      const extraPacks = typeof ownedPacks === 'number' && Number.isFinite(ownedPacks)
+        ? Math.max(0, Math.min(10, Math.floor(ownedPacks))) : 0;
       if (extraPacks > 0) {
         for (let i = 0; i < extraPacks; i++) shopManager.consume('extra_skill');
         s.skills = (teamSkills || s.skills).map(sk => ({ ...sk, usesLeft: sk.usesLeft + extraPacks }));
@@ -1172,16 +1291,25 @@ export function create(rootEl, globalStateRef) {
       s.stealthUntil = now + 15000;
       addSystemMessage('🌫️ [匿影藏形] 已开启，你的 GPS 标记隐藏 15 秒！');
       renderMarkers();
-      later(() => { s.isStealthActive = false; s.stealthUntil = 0; renderMarkers(); }, 15000);
+      later(() => {
+        if (s.stealthUntil > Date.now()) return;
+        s.isStealthActive = false;
+        s.stealthUntil = 0;
+        renderMarkers();
+      }, 15000);
     } else if (skill.id === 'golden_shield') {
       s.isShieldActive = true;
       addSystemMessage('🛡️ [金钟罩] 护盾开启，10 秒内免疫靠近相遇！');
       later(() => { s.isShieldActive = false; }, 10000);
     } else if (skill.id === 'xray') {
-      s.xrayUntil = now + 10000;
+      s.xrayUntil = Math.max(s.xrayUntil || 0, now + 10000);
       addSystemMessage('👁️ [火眼金睛] 已开启，10 秒内高亮锁定全图敌人！');
       renderMarkers();
-      later(() => { s.xrayUntil = 0; renderMarkers(); }, 10000);
+      later(() => {
+        if (s.xrayUntil > Date.now()) return;
+        s.xrayUntil = 0;
+        renderMarkers();
+      }, 10000);
     } else if (skill.id === 'decoy_signal') {
       s.decoyUntil = now + 10000;
       addSystemMessage('📢 [声东击西] 已在附近生成伪造 GPS 诱饵标记！');
@@ -1215,25 +1343,33 @@ export function create(rootEl, globalStateRef) {
     showToast({ title: '打开背包', icon: 'none' });
   };
 
-  /* ---------- 抓捕事件（源 L999-1019 原样） ---------- */
+  /* ---------- 抓捕结果与个人统计 ---------- */
 
   const onCatchEvent = (catName, mouseName, success, ids = null) => {
-    actionCount = (actionCount || 0) + 1;
     // 联机事件带玩家 ID，按 ID 判定归属；单机按名字
     const myId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'me';
     const isMyCat = ids ? String(ids.catId) === String(myId) : catName === s.myName;
     const isMyMouse = ids ? String(ids.mouseId) === String(myId) : mouseName === s.myName;
+    const msg = success
+      ? (isMyCat ? `🐱 抓捕成功！你抓到了 🐭 ${mouseName}，积分 +10！`
+        : isMyMouse ? `🐭 你被 🐱 ${catName} 抓捕了！`
+          : `🐱 ${catName} 抓捕成功，抓到了 🐭 ${mouseName}！`)
+      : (isMyMouse ? `🐭 逃脱成功！你躲开了 🐱 ${catName}，积分 +5！`
+        : `🐭 ${mouseName} 逃脱成功，躲开了 🐱 ${catName}！`);
+    addSystemMessage(msg);
+    if (!isMyCat && !isMyMouse) return;
+    actionCount = (actionCount || 0) + 1;
     if (success && isMyCat) myCatches = (myCatches || 0) + 1;
     if (!success && isMyMouse) myEscapes = (myEscapes || 0) + 1;
     if (success && s.myTeam === 'cat' && isMyCat) {
       achievementManager.recordCatch();
     }
-    const msg = success ? `🐱 ${catName} 追上了 🐭 ${mouseName}，相遇成功!` : `🐭 ${mouseName} 躲开了相遇，躲避成功!`;
     s.showCatchOverlay = true;
     s.catchMessage = msg;
     renderCatch();
-    addSystemMessage(msg);
-    later(() => {
+    clearTimeout(catchOverlayTimer);
+    catchOverlayTimer = later(() => {
+      catchOverlayTimer = null;
       s.showCatchOverlay = false;
       renderCatch();
     }, 2500);
@@ -1268,8 +1404,8 @@ export function create(rootEl, globalStateRef) {
     const now = Date.now();
     const scanOn = (s.scanUntil || 0) > now;
     const rows = [
-      { id: 'me', name: s.myName || '我', team: s.myTeam, score: s.myScore, isMe: true },
-      ...(aiPlayers || []).map(p => ({ id: String(p.id), name: p.name, team: p.team, score: p.score || 0, isMe: false }))
+      { id: 'me', name: s.myName || '我', team: s.myTeam, score: normalizeScore(s.myScore), isMe: true },
+      ...(aiPlayers || []).map(p => ({ id: String(p.id), name: p.name, team: p.team, score: normalizeScore(p.score), isMe: false }))
     ].sort((a, b) => b.score - a.score)
       .map((r, i) => ({ ...r, rank: i + 1, top3: i < 3, scanOn }));
     s.liveRank = rows;
@@ -1329,6 +1465,7 @@ export function create(rootEl, globalStateRef) {
       gameTimer = null;
       gameTickTimer = null;
       s.isPaused = true;
+      roomSession.paused = true;
       s.gamePhase = 'PAUSED';
       renderPhase();
       addSystemMessage(fromNet ? '⏸ 房主暂停了活动' : '⏸ 你暂停了活动，倒计时与计分已冻结');
@@ -1336,10 +1473,25 @@ export function create(rootEl, globalStateRef) {
         networkManager.send(MSG_TYPES.GAME_PAUSE, { paused: true });
       }
     } else {
+      const startingPausedRound = s.gamePhase === 'PAUSED' && !locationWatchStarted &&
+        !simMovementTimer && !hasRealLocation && track.length === 0;
+      if (startingPausedRound) {
+        s.isPaused = false;
+        roomSession.paused = false;
+        s.gamePhase = 'WAITING';
+        renderPhase();
+        if (!fromNet && s.netMode !== 'OFFLINE') {
+          networkManager.send(MSG_TYPES.GAME_PAUSE, { paused: false });
+        }
+        startGame();
+        return;
+      }
       s.isPaused = false;
+      roomSession.paused = false;
       s.gamePhase = 'PLAYING';
       gameTimer = setInterval(() => updateTimer(), 1000);
       gameTickTimer = setInterval(() => gameTick(), 1500);
+      startLocationWatch();
       renderPhase();
       addSystemMessage(fromNet ? '▶️ 房主恢复活动，继续！' : '▶️ 活动继续！');
       if (!fromNet && s.netMode !== 'OFFLINE') {
@@ -1429,6 +1581,8 @@ export function create(rootEl, globalStateRef) {
       networkManager.send(MSG_TYPES.GAME_END, {});
     }
     clearAllTimers();
+    stopLocationUpdate();
+    locationWatchStarted = false;
     soundVibration.playSound('catch_success');
     s.gamePhase = 'END';
     voicePanelOpen = false;
@@ -1439,9 +1593,9 @@ export function create(rootEl, globalStateRef) {
 
     const myPlayerId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'player_1';
     const allPlayers = [
-      { id: myPlayerId, name: s.myName || '玩家', team: s.myTeam, score: s.myScore },
+      { id: myPlayerId, name: s.myName || '玩家', team: s.myTeam, score: normalizeScore(s.myScore) },
       ...(aiPlayers || []).map(ai => ({
-        id: String(ai.id), name: ai.name, team: ai.team, score: ai.score || 0
+        id: String(ai.id), name: ai.name, team: ai.team, score: normalizeScore(ai.score)
       }))
     ];
 
@@ -1554,6 +1708,11 @@ export function create(rootEl, globalStateRef) {
       return;
     }
 
+    viewActive = true;
+    viewGeneration++;
+    locationWatchStarted = false;
+    if (globalStateRef.netMode === 'SERVER') aiPlayers = [];
+
     console.log('Game loading with real outdoor GPS mechanics...');
     skillUsed = 0;
     actionCount = 0;
@@ -1573,22 +1732,26 @@ export function create(rootEl, globalStateRef) {
     scanCdMs = 30000;
 
     const netMode = (globalStateRef.netMode || 'OFFLINE');
+    if (netMode === 'SERVER' && roomSession.myPlayer) {
+      globalStateRef.currentPlayer = { ...roomSession.myPlayer };
+    }
     // 房主判定：单机默认自己是主持人；联机以 roomSession.isHost 为准
     const isHost = netMode === 'OFFLINE' || roomSession.isHost === true;
     s.isHost = isHost;
-    const myTeam = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.team) || 'mouse';
+    const currentPlayer = globalStateRef.currentPlayer;
+    const myTeam = (currentPlayer && currentPlayer.team) || 'mouse';
     const titleObj = achievementManager.getEquippedTitleObj();
     gameArea = (globalStateRef.gameArea || null);
     const areaCenter = GameArea.center(gameArea);
     const gameDurationSeconds = Math.max(60, Math.min(7200, Number(globalStateRef.gameDurationSeconds) || 600));
 
     s.myTeam = myTeam;
-    s.myName = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.name) || '玩家';
+    s.myName = (currentPlayer && currentPlayer.name) || '玩家';
     s.equippedTitle = titleObj.icon + ' ' + titleObj.name;
     s.netMode = netMode;
     // 抓捕判定方式：读自主页面设置（instant / sustained，默认 sustained）
     s.catchMode = getStorage('catchMode') === 'instant' ? 'instant' : 'sustained';
-    s.myScore = 0;
+    s.myScore = netMode === 'SERVER' ? normalizeScore(currentPlayer?.score) : 0;
     s.distance = 0;
     s.battleFeed = [];
     s.chatMessages = [];
@@ -1602,11 +1765,12 @@ export function create(rootEl, globalStateRef) {
     s.xrayUntil = 0;
     s.decoyUntil = 0;
     s.radarUntil = 0;
+    s.trapUntil = 0;
     s.satellite = false; // 与地图默认一致：校园图
     s.scanUntil = 0;
     s.showRankModal = false;
     s.liveRank = [];
-    s.isPaused = false;
+    s.isPaused = netMode === 'SERVER' && roomSession.paused === true;
     s.radarActive = false;
     s.skills = SkillSystem.getSkillsForTeam(myTeam);
     if (areaCenter) {
@@ -1680,11 +1844,22 @@ export function create(rootEl, globalStateRef) {
     }
     renderMarkers();
 
-    startCountdown(netMode === 'SERVER' ? roomSession.startAt : null);
+    if (s.isPaused) {
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = null;
+      s.gamePhase = 'PAUSED';
+      renderPhase();
+      addSystemMessage('⏸ 本局仍处于暂停状态，等待房主恢复');
+    } else {
+      startCountdown(netMode === 'SERVER' ? roomSession.startAt : null);
+    }
   };
 
   // 源 onUnload L197-205
   const onHide = () => {
+    viewActive = false;
+    viewGeneration++;
+    locationWatchStarted = false;
     if (blockedEntry) {
       blockedEntry = false;
       return;

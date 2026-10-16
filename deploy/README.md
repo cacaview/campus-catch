@@ -1,6 +1,6 @@
 # 部署到 106.53.199.187
 
-本目录将静态 Web 客户端部署到 Nginx，将房间聊天/语音信令部署为 loopback-only Node relay，并用 Coturn 转发 WebRTC 媒体。浏览器只访问 `https://106.53.199.187/`、`wss://106.53.199.187/ws` 和 `/api/ice-config`。TURN 共享密钥、Certbot 状态和 TLS 私钥仅保存在服务器。
+本目录将静态 Web 客户端部署到 Nginx，将房间聊天/语音信令部署为 loopback-only Node relay，并用 Coturn 转发 WebRTC 媒体。游戏联机默认访问 `https://106.53.199.187/`、`wss://106.53.199.187/ws` 和 `/api/ice-config`。地图另外访问 Esri 卫星瓦片，用户也可在首页选择其他中继。TURN 共享密钥、Certbot 状态和 TLS 私钥仅保存在服务器。
 
 ## 端口
 
@@ -39,6 +39,8 @@ python3 -m venv /opt/certbot
 
 版本必须为 5.4 或更新版本。
 
+已有部署更新时，先将静态目录与 server/shared 源码备份到服务器的 `/var/backups/game-web/`；先上传共用 `shared/`，再上传消费者模块，最后替换 `index.html` 并重启 relay。不要备份或下载密钥文件到仓库。
+
 本地上传命令使用项目服务器密钥。先在本地项目根目录设置路径，所有传输命令显式指定该密钥：
 
 ```sh
@@ -70,8 +72,10 @@ chmod 0600 /etc/game-web-relay.env
 从项目根目录在本地执行，将 Web 客户端和 relay 文件分别上传：
 
 ```sh
-rsync -ac -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" index.html css js vendor assets root@106.53.199.187:/var/www/game-web/
+rsync -ac -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" shared root@106.53.199.187:/opt/game-web/
+rsync -ac --exclude=index.html -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" css js shared vendor assets root@106.53.199.187:/var/www/game-web/
 rsync -ac --exclude=node_modules/ -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" server/ root@106.53.199.187:/opt/game-web/server/
+rsync -ac -e "ssh -i $KEY_FILE -o IdentitiesOnly=yes" index.html root@106.53.199.187:/var/www/game-web/
 scp -i "$KEY_FILE" -o IdentitiesOnly=yes deploy/systemd/game-web-relay.service root@106.53.199.187:/etc/systemd/system/game-web-relay.service
 scp -i "$KEY_FILE" -o IdentitiesOnly=yes deploy/turnserver.conf.example root@106.53.199.187:/opt/game-web/turnserver.conf.example
 ```

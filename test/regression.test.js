@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -52,13 +51,14 @@ test('regression: 校园图片为默认底图且不依赖 CARTO 或 OSM 瓦片',
 
 test('regression: 入口和视图循环引用使用同一版本的 main 模块', () => {
   const index = read('index.html');
-  const entry = index.match(/src="js\/main\.js\?v=([a-f0-9]{12})"/);
+  const entry = index.match(/src="js\/main\.js\?v=([^"]+)"/);
   assert.ok(entry, 'main 模块入口缺少内容版本参数');
   const main = read('js/main.js');
-  assert.equal(entry[1], createHash('sha256').update(main).digest('hex').slice(0, 12));
-  for (const view of ['home', 'lobby', 'game', 'result', 'rank']) {
+  // Views import main.js back, so all must refresh with the same release.
+  const viewVersions = Object.fromEntries(['home', 'lobby', 'game', 'result', 'rank'].map(view => [view, entry[1]]));
+  for (const view of Object.keys(viewVersions)) {
     assert.match(read(`js/views/${view}.js`), new RegExp(`from ['"]\\.\\./main\\.js\\?v=${entry[1]}['"]`));
-    assert.match(main, new RegExp(`from ['"]\\.\\/views\\/${view}\\.js\\?v=${view === 'game' ? '20261005qa' : '20261003d'}['"]`));
+    assert.match(main, new RegExp(`from ['"]\\.\\/views\\/${view}\\.js\\?v=${viewVersions[view]}['"]`));
   }
 });
 
@@ -85,8 +85,10 @@ test('regression: 首页载入时迁移旧校区中心保存的活动区域', ()
   const home = read('js/views/home.js');
   assert.match(home, /LEGACY_CAMPUS_CENTER\s*=\s*\{\s*latitude:\s*25\.238236,\s*longitude:\s*110\.284419\s*\}/);
   assert.match(home, /from '\.\.\/utils\/game-area\.js\?v=mapfix-20261003a'/);
-  assert.match(home, /from '\.\.\/lib\/map\.js\?v=mapblend-20261003a'/);
+  assert.match(home, /from '\.\.\/lib\/map\.js\?v=mapblend-20261008opacity1'/);
   assert.match(home, /GameArea\.rebasePoints\(restored,\s*LEGACY_CAMPUS_CENTER,\s*DEFAULT_CENTER/);
+  assert.match(home, /PREVIOUS_CAMPUS_CENTER\s*=\s*\{\s*latitude:\s*25\.096525,\s*longitude:\s*110\.273130\s*\}/);
+  assert.match(home, /GameArea\.rebasePoints\(olderMigration,\s*PREVIOUS_CAMPUS_CENTER,\s*DEFAULT_CENTER/);
   assert.match(home, /if\s*\(migrated\s*!==\s*restored\)\s*saveConfig\(\)/);
 });
 
@@ -174,7 +176,7 @@ test('regression: server gameplay begins at the relay deadline while location re
   const effects = [];
   const runStartGame = new Function(
     's', 'GameArea', 'gameArea', 'hasRealLocation', 'beginPlaying', 'getLocation',
-    'simMovementTimer', 'clearInterval', 'applyLocation', 'startLocationWatch', 'showToast',
+    'simMovementTimer', 'clearInterval', 'applyLocation', 'startLocationWatch', 'showToast', 'viewActive', 'viewGeneration',
     `'use strict';\n${startGame[1]}`
   );
   assert.doesNotThrow(() => runStartGame(
@@ -188,7 +190,8 @@ test('regression: server gameplay begins at the relay deadline while location re
     () => effects.push('clear-simulation'),
     () => effects.push('apply-location'),
     () => effects.push('watch-location'),
-    () => effects.push('toast')
+    () => effects.push('toast'),
+    true, 1
   ));
   assert.deepEqual(effects, ['begin', 'request-location', 'clear-simulation', 'apply-location', 'watch-location']);
 });
@@ -336,3 +339,19 @@ test('regression: 主页面可设置抓捕判定方式（即时 / 3 秒持续）
   assert.match(session, /if \(payload\.catchMode === 'instant' \|\| payload\.catchMode === 'sustained'\) this\.catchMode = payload\.catchMode;/);
 });
 
+test('regression: 道具效果完整（猫薄荷透视 / 陷阱 3 秒 / 草丛隐身）', () => {
+  const src = read('js/views/game.js');
+  assert.match(src, /const CATNIP_XRAY_MS = 5000;/);
+  assert.match(src, /const TRAP_DURATION_MS = 3000;/);
+  assert.match(src, /const BUSH_DURATION_MS = 5000;/);
+  // 猫薄荷：5 秒透视
+  assert.match(src, /s\.xrayUntil = Math\.max\(s\.xrayUntil \|\| 0, Date\.now\(\) \+ CATNIP_XRAY_MS\);/);
+  // 陷阱：3 秒被困，被困期间不计行为分
+  assert.match(src, /s\.trapUntil = Date\.now\(\) \+ TRAP_DURATION_MS;/);
+  assert.match(src, /const trapped = \(s\.trapUntil \|\| 0\) > Date\.now\(\);\s*if \(!trapped\) \{/);
+  // 草丛：位置标记隐藏 5 秒（不缩短已有匿影藏形）
+  assert.match(src, /s\.stealthUntil = Math\.max\(s\.stealthUntil \|\| 0, Date\.now\(\) \+ BUSH_DURATION_MS\);/);
+  // 状态含 trapUntil 且开局清零
+  assert.match(src, /trapUntil: 0,/);
+  assert.match(src, /s\.trapUntil = 0;/);
+});
