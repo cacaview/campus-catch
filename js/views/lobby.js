@@ -1,7 +1,7 @@
 // js/views/lobby.js — 单机 AI 大厅与服务器在线等待大厅
-import { navigate } from '../main.js?v=20261016audit1';
-import { showToast, showModal, setClipboardData } from '../platform/ui.js';
-import { networkManager } from '../utils/network/network-manager.js';
+import { navigate } from '../main.js?v=20261018settlement2';
+import { showToast, showModal, setClipboardData } from '../platform/ui.js?v=20261018settlement2';
+import { networkManager } from '../utils/network/network-manager.js?v=20261018settlement2';
 import { roomSession } from '../utils/network/room-session.js';
 import { MSG_TYPES } from '../utils/network/protocol.js';
 

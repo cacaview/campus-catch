@@ -16,19 +16,20 @@ function catchHarness() {
     timers.set(id, { callback, at: now + delay });
     return id;
   };
-  const s = { myName: '小猫', myTeam: 'cat', showCatchOverlay: false, catchMessage: '' };
+  const settlements = [];
+  const s = { gamePhase: 'PLAYING', myName: '小猫', myTeam: 'cat', showCatchOverlay: false, catchMessage: '' };
   const overlay = { hidden: true, textContent: '' };
   const feed = [];
   const run = new Function('s', 'globalStateRef', 'later', 'clearTimeout', 'renderCatch',
-    'addSystemMessage', 'achievementManager', `
+    'addSystemMessage', 'achievementManager', 'endGame', `
     let actionCount = 0, myCatches = 0, myEscapes = 0, catchOverlayTimer = null;
     const onCatchEvent = (catName, mouseName, success, ids = null) => {${body}\n};
     return { event: onCatchEvent, stats: () => ({ actionCount, myCatches, myEscapes }) };
   `)(s, { currentPlayer: { id: 'me' } }, later, id => timers.delete(id), () => {
     overlay.hidden = !s.showCatchOverlay;
     overlay.textContent = s.catchMessage;
-  }, message => feed.push(message), { recordCatch() {} });
-  return { ...run, overlay, feed, s, advance(ms) {
+  }, message => feed.push(message), { recordCatch() {} }, (fromNet, reason) => { settlements.push({ fromNet, reason }); s.gamePhase = 'END'; });
+  return { ...run, overlay, feed, s, settlements, advance(ms) {
     now += ms;
     for (const [id, timer] of timers) {
       if (timer.at <= now) { timers.delete(id); timer.callback(); }
@@ -48,11 +49,13 @@ test('successful catch visibly tells the catching player 抓捕成功', () => {
   assert.deepEqual(h.stats(), { actionCount: 1, myCatches: 1, myEscapes: 0 });
 });
 
-test('caught mouse receives an unambiguous caught message', () => {
+test('caught mouse immediately enters personal settlement', () => {
   const h = catchHarness();
   h.s.myTeam = 'mouse';
   h.event('对手', '小猫', true, { catId: 'other', mouseId: 'me' });
-  assert.match(h.overlay.textContent, /你被.*抓捕/);
+  assert.match(h.feed.at(-1), /你被.*抓捕/);
+  assert.deepEqual(h.settlements, [{ fromNet: true, reason: 'caught' }]);
+  assert.equal(h.s.gamePhase, 'END');
 });
 
 test('new catch stays visible for its full duration when results arrive close together', () => {

@@ -442,6 +442,8 @@ test('auto-catches after three continuous seconds within range', () => {
   assert.equal(events.length, 1);
   assert.deepEqual(events[0].payload, {
     success: true,
+    catScore: 10,
+    mouseScore: 0,
     catId: 'cat1',
     catName: 'Player cat1',
     mouseId: 'mouse1',
@@ -511,7 +513,7 @@ test('golden shield absorbs one proximity catch and is consumed', () => {
   assert.equal(events[1].payload.success, true);
 });
 
-test('pair cooldown prevents an immediate recatch', () => {
+test('caught mouse cannot be caught again after the cooldown', () => {
   const { cat, mouse, move, at } = startedCatchRoom();
 
   move(mouse, BASE_LAT, BASE_LNG);
@@ -528,7 +530,7 @@ test('pair cooldown prevents an immediate recatch', () => {
   move(cat, BASE_LAT + metersToDeg(5), BASE_LNG); // 冷却结束，重新累计 3 秒
   at(16_000);
   move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
-  assert.equal(cat.packets('CATCH_EVENT').length, 2);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
 });
 
 test('cat radar skill extends the catch radius to 25 meters', () => {
@@ -593,7 +595,7 @@ test('instant mode resolves the catch on the first in-range move', () => {
   assert.equal(mouse.packets('CATCH_EVENT').length, 1);
 });
 
-test('instant mode pair cooldown prevents an immediate recatch', () => {
+test('instant mode eliminates the mouse permanently', () => {
   const { cat, mouse, move, at } = startedCatchRoom({ catchMode: 'instant' });
 
   move(mouse, BASE_LAT, BASE_LNG);
@@ -604,7 +606,7 @@ test('instant mode pair cooldown prevents an immediate recatch', () => {
   at(10_000);
   move(mouse, BASE_LAT, BASE_LNG); // 刷新位置，避免 5 秒过期
   move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
-  assert.equal(cat.packets('CATCH_EVENT').length, 2);
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
 });
 
 test('instant mode golden shield blocks the first encounter and is consumed', () => {
@@ -661,4 +663,77 @@ test('rejects out-of-range coordinates without evaluating catches', () => {
   move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
 
   assert.equal(cat.packets('CATCH_EVENT').length, 1, '合法位置仍正常累计抓捕');
+});
+
+
+test('caught mouse leaves immediately, cannot act or reconnect, while the cat keeps playing', () => {
+  const { registry, cat, mouse, move } = startedCatchRoom({ catchMode: 'instant' });
+  const token = registry.rooms.get('1234').playerSessions.get('mouse1').token;
+  move(mouse, BASE_LAT, BASE_LNG);
+  move(cat, BASE_LAT + metersToDeg(5), BASE_LNG);
+  const room = registry.rooms.get('1234');
+  assert.equal(room.members.has('mouse1'), false);
+  assert.equal(room.phase, 'STARTED');
+  assert.equal(mouse.readyState, 3);
+  cat.clear();
+  move(mouse, BASE_LAT, BASE_LNG);
+  registry.handlePacket(mouse, packet('USE_SKILL', { skillId: 'stealth' }));
+  registry.handlePacket(mouse, packet('CHAT_MESSAGE', { text: 'still here' }));
+  assert.equal(cat.sent.length, 0);
+  const retry = joined(registry, 'mouse1', '1234', 'mouse', false, { reconnectToken: token });
+  assert.equal(retry.packets('JOIN_ACK').at(-1).payload.success, false);
+  move(cat, BASE_LAT, BASE_LNG);
+  assert.equal(room.playerPositions.has('cat1'), true);
+});
+
+test('two nearby cats cannot catch the same mouse twice in one evaluation', () => {
+  let now = -3000;
+  const registry = new RoomRegistry({ now: () => now });
+  const cat = joined(registry, 'cat', '1234', 'cat', true, { catchMode: 'instant' });
+  const cat2 = joined(registry, 'cat2', '1234', 'cat');
+  const mouse = joined(registry, 'mouse', '1234', 'mouse');
+  registry.handlePacket(cat, packet('ROOM_START_REQUEST'));
+  now = 0;
+  for (const socket of [cat, cat2]) registry.handlePacket(socket, packet('PLAYER_MOVE', { latitude: BASE_LAT, longitude: BASE_LNG }));
+  registry.handlePacket(mouse, packet('PLAYER_MOVE', { latitude: BASE_LAT, longitude: BASE_LNG }));
+  assert.equal(cat.packets('CATCH_EVENT').length, 1);
+  assert.equal(cat2.packets('CATCH_EVENT').length, 1);
+});
+
+test('eliminating the mouse host transfers authority without ending the other players round', () => {
+  let now = -3000;
+  const registry = new RoomRegistry({ now: () => now });
+  const host = joined(registry, 'host', '1234', 'mouse', true, { catchMode: 'instant' });
+  const cat = joined(registry, 'cat', '1234', 'cat');
+  registry.handlePacket(host, packet('ROOM_START_REQUEST'));
+  now = 0;
+  registry.handlePacket(cat, packet('PLAYER_MOVE', { latitude: BASE_LAT, longitude: BASE_LNG }));
+  registry.handlePacket(host, packet('PLAYER_MOVE', { latitude: BASE_LAT, longitude: BASE_LNG }));
+  assert.equal(registry.rooms.get('1234').hostId, 'cat');
+  assert.equal(cat.packets('ROOM_HOST_CHANGED').at(-1).payload.hostId, 'cat');
+  assert.equal(cat.packets('GAME_END').length, 0);
+  registry.handlePacket(cat, packet('GAME_END'));
+  assert.equal(registry.rooms.get('1234').phase, 'ENDED');
+});
+
+
+test('catch event includes both scores after the catching movement and reward', () => {
+  const { registry, cat, mouse } = startedCatchRoom({ catchMode: 'instant' });
+  registry.handlePacket(mouse, packet('PLAYER_MOVE', { latitude: BASE_LAT, longitude: BASE_LNG, score: 17 }));
+  registry.handlePacket(cat, packet('PLAYER_MOVE', { latitude: BASE_LAT, longitude: BASE_LNG, score: 7 }));
+  const event = mouse.packets('CATCH_EVENT').at(-1).payload;
+  assert.equal(event.catScore, 17);
+  assert.equal(event.mouseScore, 17);
+});
+
+test('in-flight pre-catch movement does not erase the cats reward before a second catch', () => {
+  let now = -3000;
+  const registry = new RoomRegistry({ now: () => now });
+  const cat = joined(registry, 'cat', '1234', 'cat', true, { catchMode: 'instant' });
+  const mouse = joined(registry, 'mouse', '1234', 'mouse');
+  const mouse2 = joined(registry, 'mouse2', '1234', 'mouse');
+  registry.handlePacket(cat, packet('ROOM_START_REQUEST')); now = 0;
+  const move = socket => registry.handlePacket(socket, packet('PLAYER_MOVE', { latitude: BASE_LAT, longitude: BASE_LNG, score: 0 }));
+  move(cat); move(mouse); move(cat); move(mouse2);
+  assert.deepEqual(cat.packets('CATCH_EVENT').map(p => p.payload.catScore), [10, 20]);
 });

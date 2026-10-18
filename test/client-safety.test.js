@@ -12,20 +12,21 @@ function harness(name, extra = {}) {
   const root = element();
   root.querySelector = key => { if (key === '#result-share-canvas') return null; if (!elements.has(key)) elements.set(key, element()); return elements.get(key); };
   const listeners = new Map(), intervals = new Map(), locations = [], sent = [], storage = new Map();
-  let timer = 0, watches = 0;
+  let timer = 0, watches = 0, disconnects = 0, stops = 0;
+  const routes = [];
   const currentPlayer = { id: 'me', name: 'Me', team: 'cat' };
   const state = { currentPlayer, netMode: 'SERVER', gameDurationSeconds: 600, gameArea: { points: [] } };
-  const roomSession = { phase: 'STARTED', startAt: 0, myPlayer: currentPlayer, members: [currentPlayer, { id: 'other', name: 'Canonical', team: 'mouse' }], isHost: false, paused: false, pickedMapItemIds: [] };
+  const roomSession = { phase: 'STARTED', startAt: 0, myPlayer: currentPlayer, members: [currentPlayer, { id: 'other', name: 'Canonical', team: 'mouse' }], isHost: false, paused: false, pickedMapItemIds: [], roomId: 'room-1234', reset() { this.roomId = ''; this.phase = 'WAITING'; this.members = []; } };
   let markers = [];
   const map = { setPolygon() {}, fitBounds() {}, setMarkers(next) { markers = next; }, destroy() {}, setPolylines() {} };
   const context = vm.createContext({ console: { log() {}, warn() {} }, Date, Math, Set, Map, WeakSet, Number, String, URL, location: { origin: 'https://example.test', pathname: '/', href: 'https://example.test/' },
     document: { getElementById: id => root.querySelector('#' + id), createElement: element },
-    navigate() {}, DEFAULT_CENTER: { latitude: 1, longitude: 2 }, showToast() {}, showModal: () => Promise.resolve({}), showActionSheet: () => Promise.resolve({}),
+    dismissDialogs() {}, navigate: route => routes.push(route), DEFAULT_CENTER: { latitude: 1, longitude: 2 }, showToast() {}, showModal: () => Promise.resolve({}), showActionSheet: () => Promise.resolve({}),
     getStorage: key => storage.get(key), setStorage: (key, value) => storage.set(key, value),
     setTimeout: () => ++timer, clearTimeout() {}, setInterval: callback => { const id = ++timer; intervals.set(id, callback); return id; }, clearInterval: id => intervals.delete(id),
-    getLocation: callbacks => locations.push(callbacks), startLocationUpdate: () => { watches++; return true; }, stopLocationUpdate() {},
+    getLocation: callbacks => locations.push(callbacks), startLocationUpdate: () => { watches++; return true; }, stopLocationUpdate() { stops++; },
     createMap: () => map, roomSession,
-    networkManager: { state: 'CONNECTED', on: (type, handler) => listeners.set(type, handler), off: type => listeners.delete(type), send: (type, body) => { sent.push({ type, body }); return true; }, disconnect() {} },
+    networkManager: { state: 'CONNECTED', on: (type, handler) => listeners.set(type, handler), off: type => listeners.delete(type), send: (type, body) => { sent.push({ type, body }); return true; }, disconnect() { disconnects++; } },
     MSG_TYPES: new Proxy({}, { get: (_, key) => key }), VoiceManager: class { snapshot = { state: 'IDLE', channel: null, muted: false, members: [] }; channelCounts = {}; on() {} off() {} refreshChannelCounts() {} destroy() {} },
     GameArea: { isValidArea: () => true, contains: () => true, center: () => ({ latitude: 1, longitude: 2 }) },
     SkillSystem: { getSkillsForTeam: () => [], isSkillAvailable: () => true },
@@ -34,11 +35,11 @@ function harness(name, extra = {}) {
     ...extra
   });
   let source = read(name).replace(/^import .*;\n/gm, '').replace('export function create', 'function create');
-  if (name === 'game') source = source.replace('return { onShow, onHide };', 'return { onShow, onHide, s, renderFeed, renderRankModal, renderMarkers, onShowRank, startGame, startLocationWatch, startSimulatedMovement, resumeGame, setPaused, gameTick, ai: () => aiPlayers };');
+  if (name === 'game') source = source.replace('return { onShow, onHide };', 'return { onShow, onHide, s, renderFeed, renderRankModal, renderMarkers, onShowRank, startGame, startLocationWatch, startSimulatedMovement, resumeGame, setPaused, gameTick, endGame, updateTimer, onCatchEvent, resolveOfflineCatch, ai: () => aiPlayers };');
   if (name === 'result') source = source.replace('return { onShow, onHide };', 'return { onShow, onHide, s, playerItemHtml, saveToHistory };');
   vm.runInContext(source + '\nglobalThis.makeView = create;', context);
   const view = context.makeView(root, state);
-  return { view, state, roomSession, elements, listeners, intervals, locations, sent, storage, watches: () => watches, markers: () => markers };
+  return { view, state, roomSession, elements, listeners, intervals, locations, sent, storage, routes, disconnects: () => disconnects, stops: () => stops, watches: () => watches, markers: () => markers };
 }
 
 test('feed and live rank render participant markup as literal text', () => {
@@ -305,4 +306,131 @@ test('skill supply consumes at most ten bonus packs and leaves remaining stock',
   assert.equal(stock, 40);
   assert.equal(h.view.s.skills[0].usesLeft, 12);
   assert.equal(h.view.s.skills[0].maxUses, 2);
+});
+
+
+test('caught online mouse settles once, disconnects immediately and cannot restart by returning to game', () => {
+  const h = harness('game');
+  h.state.currentPlayer.team = 'mouse'; h.roomSession.isHost = true;
+  h.view.onShow(); h.view.s.gamePhase = 'PLAYING';
+  h.view.s.myScore = 3;
+  const catchEvent = h.listeners.get('CATCH_EVENT');
+  catchEvent({ catId: 'other', catName: 'Cat', mouseId: 'me', mouseName: 'Me', success: true });
+  assert.equal(h.view.s.gamePhase, 'END');
+  assert.equal(h.state.lastGameResult.reason, 'caught');
+  assert.equal(h.state.lastGameResult.winner, null, 'personal elimination does not declare a room winner');
+  assert.equal(h.state.lastGameResult.players.find(p => p.id === 'me').score, 3);
+  assert.equal(h.state.gameReady, false);
+  assert.equal(h.roomSession.roomId, '');
+  assert.equal(h.disconnects(), 1);
+  assert.equal(h.stops(), 1);
+  assert.equal(h.intervals.size, 0);
+  assert.equal(h.listeners.size, 0);
+  assert.deepEqual(h.routes, ['result']);
+  assert.equal(h.sent.some(p => p.type === 'GAME_END'), false, 'eliminated host must not end the room');
+  const result = h.state.lastGameResult;
+  catchEvent({ catId: 'other', catName: 'Cat', mouseId: 'me', mouseName: 'Me', success: true });
+  h.view.gameTick(); h.view.updateTimer(); h.view.endGame();
+  assert.equal(h.state.lastGameResult, result);
+  assert.equal(h.view.s.myScore, 3);
+  h.view.onHide(); h.view.onShow();
+  assert.equal(h.view.s.gamePhase, 'END');
+  assert.equal(h.intervals.size, 0);
+  assert.equal(h.routes.at(-1), 'result');
+});
+
+test('shield absorption and successful escapes keep the mouse in the room', () => {
+  const h = harness('game'); h.state.currentPlayer.team = 'mouse'; h.view.onShow();
+  h.view.s.gamePhase = 'PLAYING';
+  const event = h.listeners.get('CATCH_EVENT');
+  event({ catId: 'other', mouseId: 'me', blocked: true });
+  event({ catId: 'other', catName: 'Cat', mouseId: 'me', mouseName: 'Me', success: false });
+  assert.equal(h.view.s.gamePhase, 'PLAYING');
+  assert.equal(h.view.s.myScore, 5);
+  assert.equal(h.disconnects(), 0);
+  assert.equal(h.state.lastGameResult, undefined);
+});
+
+for (const [trigger, reason] of [['timeout', 'timeout'], ['early', 'early'], ['host', 'host-ended'], ['kick', 'kicked']]) {
+  test(`${trigger} goes straight to settlement and leaves the room`, () => {
+    const h = harness('game'); h.roomSession.isHost = trigger !== 'host' && trigger !== 'kick';
+    h.view.onShow(); h.view.s.gamePhase = 'PLAYING';
+    if (trigger === 'timeout') { h.view.s.remainingTime = 1; h.view.updateTimer(); }
+    if (trigger === 'early') h.view.endGame();
+    if (trigger === 'host') h.listeners.get('GAME_END')({});
+    if (trigger === 'kick') h.listeners.get('PLAYER_KICK')({ playerId: 'me' });
+    assert.equal(h.view.s.gamePhase, 'END');
+    assert.equal(h.state.lastGameResult.reason, reason);
+    assert.deepEqual(h.routes, ['result']);
+    assert.equal(h.disconnects(), 1);
+    assert.equal(h.state.gameReady, false);
+    assert.equal(h.sent.filter(p => p.type === 'GAME_END').length, trigger === 'early' || trigger === 'timeout' ? 1 : 0);
+  });
+}
+
+test('offline caught mouse settles immediately and caught AI mouse stops earning points or appearing on the map', () => {
+  const h = harness('game', { Math: Object.assign(Object.create(Math), { random: () => 0.1 }) }); h.state.netMode = 'OFFLINE'; h.state.aiFillCount = 0;
+  h.state.currentPlayer.team = 'mouse'; h.view.onShow(); h.view.s.gamePhase = 'PLAYING';
+  const aiCat = { id: 101, name: 'Cat', team: 'cat', score: 1 };
+  h.view.ai().push(aiCat);
+  h.view.resolveOfflineCatch(aiCat, 1000);
+  assert.equal(h.state.lastGameResult?.players.find(p => p.id === '101')?.score, 11);
+  assert.equal(h.state.lastGameResult.reason, 'caught');
+  assert.equal(h.view.s.gamePhase, 'END');
+
+  const cat = harness('game', {
+    MapItemsManager: { spawnItems() {}, getMapMarkers: () => [], checkItemPickup() {} },
+    AIPlayerController: { updateAI: player => player }
+  });
+  cat.state.netMode = 'OFFLINE'; cat.state.aiFillCount = 0;
+  cat.view.onShow(); cat.view.s.gamePhase = 'PLAYING';
+  const mouse = { id: 101, name: 'Mouse', team: 'mouse', score: 0, latitude: 1, longitude: 2 };
+  cat.view.ai().push(mouse);
+  cat.view.resolveOfflineCatch(mouse, 1000);
+  cat.view.resolveOfflineCatch(mouse, 20000);
+  for (let i = 0; i < 20; i++) cat.view.gameTick();
+  cat.view.renderMarkers();
+  assert.equal(cat.view.s.myScore, 11, 'one catch and one patrol award');
+  assert.equal(mouse.score, 0);
+  assert.equal(cat.markers().some(marker => marker.id === 'player_101'), false);
+});
+
+test('personal settlement explains elimination without claiming a final team victory', () => {
+  const h = harness('result');
+  h.state.currentPlayer.team = 'mouse';
+  h.state.lastGameResult = { reason: 'caught', winner: null, duration: 20, players: [h.state.currentPlayer] };
+  h.view.onShow();
+  assert.match(h.elements.get('#result-title').textContent, /被抓/);
+  assert.match(h.elements.get('#result-banner').textContent, /个人结算/);
+  assert.match(h.elements.get('#result-reason').textContent, /退出房间/);
+  assert.doesNotMatch(h.elements.get('#result-banner').textContent, /最终胜利/);
+});
+
+
+test('eliminated participants stay in final scores after leaving the active roster', () => {
+  const h = harness('game'); h.view.onShow(); h.view.s.gamePhase = 'PLAYING';
+  h.listeners.get('PLAYER_MOVE')({ id: 'other', score: 17, latitude: 1, longitude: 2 });
+  h.listeners.get('CATCH_EVENT')({ catId: 'me', catName: 'Me', mouseId: 'other', mouseName: 'Canonical', success: true, catScore: 10, mouseScore: 17 });
+  h.roomSession.members = [h.state.currentPlayer];
+  h.listeners.get('PLAYER_LEFT')({ playerId: 'other' });
+  assert.equal(h.view.ai().length, 0);
+  h.view.endGame();
+  assert.equal(h.state.lastGameResult.players.find(p => p.id === 'other')?.score, 17);
+  assert.equal(h.state.lastGameResult.winner, 'mouse');
+});
+
+test('caught mouse snapshot includes the cat reward from this catch', () => {
+  const h = harness('game'); h.state.currentPlayer.team = 'mouse';
+  h.roomSession.members[1].team = 'cat'; h.view.onShow(); h.view.s.gamePhase = 'PLAYING';
+  h.listeners.get('PLAYER_MOVE')({ id: 'other', score: 7, latitude: 1, longitude: 2 });
+  h.listeners.get('CATCH_EVENT')({ catId: 'other', catName: 'Canonical', mouseId: 'me', mouseName: 'Me', success: true, catScore: 17, mouseScore: 0 });
+  assert.equal(h.state.lastGameResult.players.find(p => p.id === 'other')?.score, 17);
+});
+
+test('settlement before PLAYER_LEFT prefers the caught players final score over stale movement', () => {
+  const h = harness('game'); h.view.onShow(); h.view.s.gamePhase = 'PLAYING';
+  h.listeners.get('PLAYER_MOVE')({ id: 'other', score: 4, latitude: 1, longitude: 2 });
+  h.listeners.get('CATCH_EVENT')({ catId: 'me', catName: 'Me', mouseId: 'other', mouseName: 'Canonical', success: true, catScore: 10, mouseScore: 17 });
+  h.view.endGame();
+  assert.equal(h.state.lastGameResult.players.find(p => p.id === 'other').score, 17);
 });

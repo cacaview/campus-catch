@@ -1,14 +1,14 @@
 // js/views/home.js — 首页（源 pages/index/index.js 727 行移植，Web 版裁剪：删 LAN/扫码/二维码，服务器模式走 wss）
-import { navigate, DEFAULT_CENTER, parseQueryParams } from '../main.js?v=20261016audit1';
+import { navigate, DEFAULT_CENTER, parseQueryParams } from '../main.js?v=20261018settlement2';
 import { getStorage, setStorage } from '../platform/storage.js';
-import { showToast, showModal, showLoading, hideLoading, setClipboardData } from '../platform/ui.js';
+import { showToast, showModal, showLoading, hideLoading, setClipboardData } from '../platform/ui.js?v=20261018settlement2';
 import { createMap } from '../lib/map.js?v=mapblend-20261008opacity1';
 import { achievementManager } from '../utils/achievement.js';
 import { shopManager } from '../utils/shop.js';
 import GameArea from '../utils/game-area.js?v=mapfix-20261003a';
 import { getStablePlayerId } from '../utils/player-identity.js';
 import { Protocol } from '../utils/network/protocol.js';
-import { networkManager } from '../utils/network/network-manager.js';
+import { networkManager } from '../utils/network/network-manager.js?v=20261018settlement2';
 import { roomSession } from '../utils/network/room-session.js';
 import { DEFAULT_RELAY_URL } from '../config.js';
 

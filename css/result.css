@@ -56,6 +56,7 @@
   display: block;
   margin-bottom: 10px;
 }
+#view-result .result-reason { color: #b7bdd6; font-size: 14px; line-height: 1.6; margin: 0 0 14px; }
 #view-result .result-banner-box { text-align: center; }
 #view-result .result-banner {
   display: inline-block;

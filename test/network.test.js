@@ -444,9 +444,9 @@ test('intentional disconnect clears persisted reconnect authority', async () => 
   } finally { next.disconnect(); }
 });
 
-test('replaced and kicked close codes terminate pending retries and private authority', async () => {
+test('replaced, kicked and eliminated close codes terminate pending retries and private authority', async () => {
   const { default: NM } = await import('../js/utils/network/network-manager.js');
-  for (const code of [4001, 4003]) {
+  for (const code of [4001, 4003, 4004]) {
     const nm = new NM();
     try {
       await nm.connectServer('wss://example.test/ws', { id: 'a', name: 'A', team: 'cat' }, '4321');

@@ -69,7 +69,7 @@ export class NetworkManager {
 
     this.wsAdapter.onCloseCallback = (res) => {
       console.log('[NetworkManager] Socket close:', res);
-      if (res?.code === 4001 || res?.code === 4003) {
+      if (res?.code === 4001 || res?.code === 4003 || res?.code === 4004) {
         this.disconnect();
         return;
       }

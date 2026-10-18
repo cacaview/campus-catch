@@ -187,9 +187,11 @@ export class RoomRegistry {
       this.forgetPlayerPairEntries(room.catchWindows, state.player.id);
       return null;
     }
+    // 本局积分只增不减；迟到的抓捕前位置包不能抹掉已发出的抓捕奖励。
+    state.player.score = Math.max(state.player.score, scoreValue(payload.score));
     room.playerPositions.set(state.player.id, { latitude, longitude, at: this.now() });
     this.evaluateProximityCatches(room);
-    state.player.score = scoreValue(payload.score);
+    if (state.removed) return null;
     return this.movementPayload(state, { latitude, longitude });
   }
 
@@ -267,6 +269,7 @@ export class RoomRegistry {
     const mice = members.filter(state => state.player.team === 'mouse');
     for (const cat of cats) {
       for (const mouse of mice) {
+        if (mouse.removed) continue;
         const key = `${cat.player.id}:${mouse.player.id}`;
         const catPos = room.playerPositions.get(cat.player.id);
         const mousePos = room.playerPositions.get(mouse.player.id);
@@ -299,6 +302,7 @@ export class RoomRegistry {
   }
 
   resolveProximityCatch(room, cat, mouse, key, now) {
+    if (room.caughtPlayerIds.has(mouse.player.id)) return;
     if ((room.pairCooldowns.get(key) || 0) > now) {
       room.catchWindows.delete(key);
       return;
@@ -317,13 +321,23 @@ export class RoomRegistry {
       }, 'server'));
       return;
     }
+    const mouseId = mouse.player.id;
+    room.caughtPlayerIds.add(mouseId);
+    cat.player.score = scoreValue(cat.player.score + 10);
     this.broadcast(room, this.packet('CATCH_EVENT', {
       success: true,
+      catScore: cat.player.score,
+      mouseScore: mouse.player.score,
       catId: cat.player.id,
       catName: cat.player.name,
       mouseId: mouse.player.id,
       mouseName: mouse.player.name
     }, 'server'));
+    // 先发送抓捕结果，再退房；客户端可保留本局快照，淘汰身份不能重连继续。
+    room.playerSessions.delete(mouseId);
+    this.blockedSockets.add(mouse.ws);
+    this.removeConnection(mouse.ws, { transferHost: true });
+    try { mouse.ws.close?.(4004, 'Caught and eliminated'); } catch { /* Already closed. */ }
   }
 
   handleMapItemPickup(state, payload) {
@@ -379,8 +393,8 @@ export class RoomRegistry {
       this.send(state, 'JOIN_ACK', { success: false, reason: '房间码已被使用，请重新创建' });
       return;
     }
-    if (room?.phase === 'ENDED' || room?.kickedPlayerIds.has(playerId)) {
-      this.send(state, 'JOIN_ACK', { success: false, reason: '活动已结束或你已被移出房间' });
+    if (room?.phase === 'ENDED' || room?.kickedPlayerIds.has(playerId) || room?.caughtPlayerIds.has(playerId)) {
+      this.send(state, 'JOIN_ACK', { success: false, reason: '活动已结束或你已被淘汰、移出房间' });
       return;
     }
     const previousSession = room?.playerSessions.get(playerId);
@@ -421,6 +435,7 @@ export class RoomRegistry {
         knownPlayerIds: new Set(),
         playerSessions: new Map(),
         kickedPlayerIds: new Set(),
+        caughtPlayerIds: new Set(),
         paused: false,
         mapItems: new MapItems(),
         pickedMapItemIds: new Set(),
@@ -599,7 +614,7 @@ export class RoomRegistry {
     this.send(state, 'VOICE_ERROR', { channel, code, message });
   }
 
-  removeConnection(ws, { preserveHost = false } = {}) {
+  removeConnection(ws, { preserveHost = false, transferHost = false } = {}) {
     const state = this.connections.get(ws);
     if (!state || state.removed) return;
     if (state.voiceChannel) this.leaveVoice(state);
@@ -612,7 +627,7 @@ export class RoomRegistry {
       this.forgetPlayerPairEntries(room.pairCooldowns, state.player.id);
       if (room.members.size > 0) {
         this.broadcast(room, this.packet('PLAYER_LEFT', { playerId: state.player.id }, state.player.id));
-        if (!preserveHost && room.phase === 'WAITING' && state.player.id === room.hostId) {
+        if (!preserveHost && (room.phase === 'WAITING' || transferHost) && state.player.id === room.hostId) {
           const nextHost = [...room.members.values()].find(member => member.ws.readyState === OPEN);
           if (nextHost) {
             room.hostId = nextHost.player.id;

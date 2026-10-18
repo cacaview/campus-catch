@@ -107,3 +107,17 @@ test('vibrateShort/vibrateLong no-op without navigator.vibrate (no throw)', asyn
     mod.vibrateLong();
   });
 });
+
+test('settlement dismisses pending dialogs as cancellation and detaches old confirm handlers', async () => {
+  const els = installDom();
+  const mod = await import('../js/platform/ui.js?b=' + Date.now());
+  const modal = mod.showModal({ title: '提前结算' });
+  const sheet = mod.showActionSheet({ itemList: ['延时', '移除玩家'] });
+  mod.dismissDialogs();
+  assert.deepEqual(await modal, { confirm: false, tapIndex: 1 });
+  assert.deepEqual(await sheet, { tapIndex: -1 });
+  assert.equal(els['app-modal-mask'].classList.contains('show'), false);
+  assert.equal(els['app-actionsheet-mask'].classList.contains('show'), false);
+  assert.equal(els['app-actionsheet'].classList.contains('show'), false);
+  assert.equal(els['app-modal-confirm'].onclick, null);
+});

@@ -21,7 +21,7 @@ test('regression: 暂停面板提供仅房主可用的继续按钮', () => {
 test('regression: 房主结束活动会同步结算，接收端不会重复广播', () => {
   const src = read('js/views/game.js');
   assert.match(src, /netHandlers\.gameEnd = \(\) => endGame\(true\)/);
-  assert.match(src, /const endGame = \(fromNet = false\) => \{\s*if \(s\.gamePhase === 'END'\) return/);
+  assert.match(src, /const endGame = \(fromNet = false, reason = .*\) => \{\s*if \(s\.gamePhase === 'END'\) return/);
   assert.match(src, /if \(!fromNet && s\.isHost && s\.netMode !== 'OFFLINE'\) \{\s*networkManager\.send\(MSG_TYPES\.GAME_END, \{\}\)/);
   assert.match(src, /networkManager\.on\(MSG_TYPES\.GAME_END, netHandlers\.gameEnd\)/);
   assert.match(src, /networkManager\.off\(MSG_TYPES\.GAME_END, netHandlers\.gameEnd\)/);
@@ -223,7 +223,7 @@ test('regression: failed server room creation clears provisional room identity',
 test('regression: returning home after an online match clears the completed room session', () => {
   const result = read('js/views/result.js');
   const home = read('js/views/home.js');
-  assert.match(result, /import \{ networkManager \} from '..\/utils\/network\/network-manager\.js'/);
+  assert.match(result, /import \{ networkManager \} from '..\/utils\/network\/network-manager\.js\?v=20261018settlement2'/);
   assert.match(result, /import \{ roomSession \} from '..\/utils\/network\/room-session\.js'/);
   const cleanup = result.match(/const leaveCompletedOnlineRoom = \(\) => \{([\s\S]*?)\n  \};/);
   assert.ok(cleanup, '结算页缺少已结束联机房间清理');

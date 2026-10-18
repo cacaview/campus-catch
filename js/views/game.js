@@ -1,11 +1,11 @@
 // js/views/game.js — 游戏视图（源 pages/game/game.js 1286 行移植）
 // Web 版恢复房间聊天与 WebRTC 语音；wx→platform：定位与地图走浏览器适配层
 // wx→platform：getLocation→geo，showModal/showActionSheet→ui（Promise 化），地图→MapLibre 封装
-import { navigate, DEFAULT_CENTER } from '../main.js?v=20261016audit1';
-import { showToast, showModal, showActionSheet } from '../platform/ui.js';
+import { navigate, DEFAULT_CENTER } from '../main.js?v=20261018settlement2';
+import { showToast, showModal, showActionSheet, dismissDialogs } from '../platform/ui.js?v=20261018settlement2';
 import { getLocation, startLocationUpdate, stopLocationUpdate } from '../platform/geo.js';
 import { createMap } from '../lib/map.js?v=mapblend-20261008opacity1';
-import { networkManager } from '../utils/network/network-manager.js';
+import { networkManager } from '../utils/network/network-manager.js?v=20261018settlement2';
 import { roomSession } from '../utils/network/room-session.js';
 import { MSG_TYPES } from '../utils/network/protocol.js';
 import VoiceManager from '../utils/voice-manager.js';
@@ -219,6 +219,7 @@ export function create(rootEl, globalStateRef) {
   let locationWatchStarted = false;
   let map = null;
   let aiPlayers = [];
+  const settledPlayers = new Map();
   const pendingMapItemPickups = new Set();
   let gameArea = null;
   let countdownTimer = null;
@@ -471,6 +472,7 @@ export function create(rootEl, globalStateRef) {
 
     // AI / 联机玩家标记：火眼金睛/猫咪热感/扫描 高亮全部敌人
     (aiPlayers || []).forEach(p => {
+      if (p.eliminated) return;
       const pCat = p.team === 'cat';
       const enemy = pCat !== isCat;
       const highlight = (xrayOn && enemy) || (radarOn && enemy) || (scanOn && enemy);
@@ -685,7 +687,7 @@ export function create(rootEl, globalStateRef) {
     };
 
     netHandlers.catchEvent = payload => {
-      if (!payload) return;
+      if (!payload || s.gamePhase === 'END') return;
       const myId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'me';
       const isMyCat = String(payload.catId) === String(myId);
       const isMyMouse = String(payload.mouseId) === String(myId);
@@ -698,6 +700,18 @@ export function create(rootEl, globalStateRef) {
         }
         soundVibration.vibrateShort('heavy');
         return;
+      }
+      if (payload.success) {
+        const cat = aiPlayers.find(p => String(p.id) === String(payload.catId));
+        if (cat) cat.score = Number.isFinite(payload.catScore) ? normalizeScore(payload.catScore) : normalizeScore(cat.score + 10);
+        if (!isMyMouse) {
+          const mouse = aiPlayers.find(p => String(p.id) === String(payload.mouseId))
+            || roomSession.members.find(p => String(p.id) === String(payload.mouseId));
+          if (mouse) {
+            settledPlayers.set(String(mouse.id), { ...mouse, score: Number.isFinite(payload.mouseScore) ? normalizeScore(payload.mouseScore) : normalizeScore(mouse.score) });
+            mouse.eliminated = true;
+          }
+        }
       }
       if (payload.success && isMyCat) s.myScore += 10;
       if (!payload.success && isMyMouse) s.myScore += 5;
@@ -738,8 +752,7 @@ export function create(rootEl, globalStateRef) {
       if (!payload) return;
       const myId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'me';
       if (String(payload.playerId) === String(myId)) {
-        showModal({ title: '你被房主移出了本局', content: '可回到首页重新加入其他房间', showCancel: false })
-          .then(() => navigate('home'));
+        endGame(true, 'kicked');
         return;
       }
       aiPlayers = (aiPlayers || []).filter(p => String(p.id) !== String(payload.playerId));
@@ -1073,6 +1086,7 @@ export function create(rootEl, globalStateRef) {
 
   // 抓捕结算公共逻辑：防连点冷却 → 金钟罩吸收 → 结果（猫必成 / 鼠 30% 逃脱）
   const resolveOfflineCatch = (ai, nowTs) => {
+    if (s.gamePhase !== 'PLAYING' || ai.eliminated) return;
     if ((catchCdUntil || 0) > nowTs) return;
     if (ai._lastCatchAt && (nowTs - ai._lastCatchAt < 10000)) return;
     catchCdUntil = nowTs + 3000;
@@ -1090,16 +1104,21 @@ export function create(rootEl, globalStateRef) {
 
     if (success) {
       soundVibration.playSound('catch_success');
-      if (isCat) { s.myScore += 10; renderHud(); }
+      if (isCat) { ai.eliminated = true; s.myScore += 10; renderHud(); }
+      else ai.score = normalizeScore(ai.score + 10);
     } else {
       soundVibration.playSound('escape_success');
       if (!isCat) { s.myScore += 5; renderHud(); }
     }
-    onCatchEvent(catName, mouseName, success);
+    const myId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'me';
+    onCatchEvent(catName, mouseName, success, {
+      catId: isCat ? myId : ai.id,
+      mouseId: isCat ? ai.id : myId
+    });
   };
 
   const gameTick = () => {
-    if (s.isOutsideArea || s.isPaused) return;
+    if (s.gamePhase !== 'PLAYING' || s.isOutsideArea || s.isPaused) return;
     if (s.netMode !== 'OFFLINE') {
       networkManager.send(MSG_TYPES.PLAYER_MOVE, {
         id: (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'player_1',
@@ -1136,9 +1155,10 @@ export function create(rootEl, globalStateRef) {
       // 行为快照：AI 感知玩家与彼此
       const snapshot = [
         { latitude: s.latitude, longitude: s.longitude, team: s.myTeam },
-        ...aiPlayers
+        ...aiPlayers.filter(ai => !ai.eliminated)
       ];
       aiPlayers.forEach(ai => {
+        if (s.gamePhase !== 'PLAYING' || ai.eliminated) return;
         const move = AIPlayerController.updateAI(ai, snapshot);
         ai.latitude = move.latitude;
         ai.longitude = move.longitude;
@@ -1187,6 +1207,8 @@ export function create(rootEl, globalStateRef) {
       });
     }
 
+    if (s.gamePhase === 'END') return;
+
     // 行为分：鼠存活 +2 / 猫巡逻 +1，每 30 秒一跳（被困期间不计分）
     tickCount = (tickCount || 0) + 1;
     if (tickCount % 20 === 0 && s.gamePhase === 'PLAYING') {
@@ -1196,6 +1218,7 @@ export function create(rootEl, globalStateRef) {
       }
       if (s.netMode === 'OFFLINE') {
         (aiPlayers || []).forEach(ai => {
+          if (ai.eliminated) return;
           ai.score = normalizeScore(ai.score + (ai.team === 'mouse' ? 2 : 1));
         });
       }
@@ -1352,6 +1375,7 @@ export function create(rootEl, globalStateRef) {
   /* ---------- 抓捕结果与个人统计 ---------- */
 
   const onCatchEvent = (catName, mouseName, success, ids = null) => {
+    if (s.gamePhase === 'END') return;
     // 联机事件带玩家 ID，按 ID 判定归属；单机按名字
     const myId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'me';
     const isMyCat = ids ? String(ids.catId) === String(myId) : catName === s.myName;
@@ -1369,6 +1393,10 @@ export function create(rootEl, globalStateRef) {
     if (!success && isMyMouse) myEscapes = (myEscapes || 0) + 1;
     if (success && s.myTeam === 'cat' && isMyCat) {
       achievementManager.recordCatch();
+    }
+    if (success && isMyMouse) {
+      endGame(true, 'caught');
+      return;
     }
     s.showCatchOverlay = true;
     s.catchMessage = msg;
@@ -1548,7 +1576,7 @@ export function create(rootEl, globalStateRef) {
 
   const endEarly = async () => {
     const res = await showModal({ title: '提前结算', content: '确定现在结束本局并结算排名吗？' });
-    if (res.confirm) endGame();
+    if (res.confirm) endGame(false, 'early');
   };
 
   /* ---------- 聊天 ---------- */
@@ -1567,7 +1595,7 @@ export function create(rootEl, globalStateRef) {
   /* ---------- 计时与结算（源 L1217-1286 原样） ---------- */
 
   const updateTimer = () => {
-    if (s.isPaused) return;
+    if (s.gamePhase !== 'PLAYING' || s.isPaused) return;
     const t = s.remainingTime - 1;
     if (t <= 0) {
       s.remainingTime = 0;
@@ -1581,16 +1609,20 @@ export function create(rootEl, globalStateRef) {
     }
   };
 
-  const endGame = (fromNet = false) => {
+  const endGame = (fromNet = false, reason = fromNet ? 'host-ended' : (s.remainingTime <= 0 ? 'timeout' : 'early')) => {
     if (s.gamePhase === 'END') return; // 防倒计时归零与提前结算重复触发
+    s.gamePhase = 'END';
+    viewActive = false;
+    viewGeneration++;
     if (!fromNet && s.isHost && s.netMode !== 'OFFLINE') {
       networkManager.send(MSG_TYPES.GAME_END, {});
     }
     clearAllTimers();
+    dismissDialogs();
     stopLocationUpdate();
     locationWatchStarted = false;
     soundVibration.playSound('catch_success');
-    s.gamePhase = 'END';
+    removeNetworkListeners();
     voicePanelOpen = false;
     destroyVoiceManager();
     s.isPaused = false;
@@ -1598,21 +1630,24 @@ export function create(rootEl, globalStateRef) {
     addSystemMessage('活动结束！');
 
     const myPlayerId = (globalStateRef.currentPlayer && globalStateRef.currentPlayer.id) || 'player_1';
+    const otherPlayers = new Map([...(aiPlayers || []), ...settledPlayers.values()].map(p => [String(p.id), p]));
     const allPlayers = [
       { id: myPlayerId, name: s.myName || '玩家', team: s.myTeam, score: normalizeScore(s.myScore) },
-      ...(aiPlayers || []).map(ai => ({
+      ...[...otherPlayers.values()].map(ai => ({
         id: String(ai.id), name: ai.name, team: ai.team, score: normalizeScore(ai.score)
       }))
     ];
 
     const catScore = allPlayers.filter(p => p.team === 'cat').reduce((sum, p) => sum + p.score, 0);
     const mouseScore = allPlayers.filter(p => p.team === 'mouse').reduce((sum, p) => sum + p.score, 0);
-    const winner = catScore > mouseScore ? 'cat' : (mouseScore > catScore ? 'mouse' : 'draw');
+    const personalSettlement = reason === 'caught' || reason === 'kicked';
+    const winner = personalSettlement ? null : (catScore > mouseScore ? 'cat' : (mouseScore > catScore ? 'mouse' : 'draw'));
     const isWin = s.myTeam === winner;
 
     achievementManager.updateProgress(0, isWin, true);
 
     globalStateRef.lastGameResult = {
+      reason,
       winner,
       duration: (totalDuration || 600) - s.remainingTime,
       players: allPlayers,
@@ -1623,11 +1658,23 @@ export function create(rootEl, globalStateRef) {
         myCatches: myCatches || 0,
         myEscapes: myEscapes || 0
       },
-      track: track || []
+      track: [...(track || [])]
     };
 
-    showModal({ title: '活动结束', content: '时间到！即将前往结算页面...', showCancel: false })
-      .then(() => navigate('result'));
+    networkManager.disconnect();
+    roomSession.reset();
+    globalStateRef.netMode = 'OFFLINE';
+    globalStateRef.gameReady = false;
+    globalStateRef.clearRoomSessionOnHome = true;
+    if (typeof window !== 'undefined') {
+      const inviteUrl = new URL(window.location.href);
+      if (inviteUrl.searchParams.has('server') || inviteUrl.searchParams.has('passcode')) {
+        inviteUrl.searchParams.delete('server');
+        inviteUrl.searchParams.delete('passcode');
+        window.history.replaceState(window.history.state, '', inviteUrl);
+      }
+    }
+    navigate('result');
   };
 
   const formatTime = seconds => {
@@ -1698,6 +1745,11 @@ export function create(rootEl, globalStateRef) {
 
   // 源 onLoad L85-151
   const onShow = () => {
+    if (globalStateRef.gameReady === false) {
+      blockedEntry = true;
+      navigate(globalStateRef.lastGameResult ? 'result' : 'home');
+      return;
+    }
     if (globalStateRef.netMode === 'SERVER' && roomSession.phase !== 'STARTED') {
       blockedEntry = true;
       navigate('lobby');
@@ -1720,6 +1772,7 @@ export function create(rootEl, globalStateRef) {
     if (globalStateRef.netMode === 'SERVER') aiPlayers = [];
 
     console.log('Game loading with real outdoor GPS mechanics...');
+    settledPlayers.clear();
     skillUsed = 0;
     actionCount = 0;
     myCatches = 0;

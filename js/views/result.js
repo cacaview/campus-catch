@@ -2,13 +2,13 @@
 // wx→Web：canvasToTempFilePath→canvas.toBlob，saveImageToPhotosAlbum→a[download]，
 // onShareAppMessage→复制链接（?challenge=1&by=&team=），wx:if/wx:for→JS 渲染，
 // map 组件→MapLibre 封装，getStorageSync/setStorageSync→platform/storage
-import { navigate } from '../main.js?v=20261016audit1';
-import { showToast, setClipboardData } from '../platform/ui.js';
+import { navigate } from '../main.js?v=20261018settlement2';
+import { showToast, setClipboardData } from '../platform/ui.js?v=20261018settlement2';
 import { getStorage, setStorage } from '../platform/storage.js';
 import { createMap } from '../lib/map.js?v=mapblend-20261008opacity1';
 import GameArea from '../utils/game-area.js';
 import { getStablePlayerId } from '../utils/player-identity.js';
-import { networkManager } from '../utils/network/network-manager.js';
+import { networkManager } from '../utils/network/network-manager.js?v=20261018settlement2';
 import { roomSession } from '../utils/network/room-session.js';
 
 const normalizeScore = value => typeof value === 'number' && Number.isFinite(value)
@@ -30,6 +30,7 @@ const RESULT_HTML = `
 
     <div class="result-header anim-stagger-1">
       <span class="result-title" id="result-title"></span>
+      <p class="result-reason" id="result-reason"></p>
       <div class="result-banner-box">
         <span class="result-banner" id="result-banner"></span>
       </div>
@@ -141,12 +142,21 @@ export function create(rootEl, globalStateRef) {
         }).join('')
       : '';
 
-    $('result-title').textContent = s.result.winner === 'draw' ? '🤝 平局！'
+    const personal = s.result.reason === 'caught' || s.result.reason === 'kicked';
+    $('result-reason').textContent = ({
+      caught: '你已被抓捕，本局个人活动结束，已退出房间。其他玩家继续游戏。',
+      kicked: '你已被房主移出本局，已退出房间。',
+      timeout: '活动时间已到，本局已结算并退出房间。',
+      early: '本局已提前结束，已结算并退出房间。',
+      'host-ended': '房主已结束本局，已结算并退出房间。'
+    })[s.result.reason] || '';
+    $('result-title').textContent = personal ? (s.result.reason === 'caught' ? '🐭 你被抓到了' : '本局已结束')
+      : s.result.winner === 'draw' ? '🤝 平局！'
       : (s.result.winner === s.myTeam ? '🎉 胜利！' : '😿 失败！');
     const banner = $('result-banner');
-    const winnerCls = s.result.winner === 'draw' ? 'draw' : s.result.winner;
+    const winnerCls = personal || s.result.winner === 'draw' ? 'draw' : s.result.winner;
     banner.className = 'result-banner ' + winnerCls;
-    banner.textContent = s.result.winner === 'draw' ? '🤝 双方打成平手'
+    banner.textContent = personal ? '本局个人结算' : s.result.winner === 'draw' ? '🤝 双方打成平手'
       : ((s.result.winner === 'cat' ? '🐱 猫队' : '🐭 鼠队') + ' 获得最终胜利');
 
     $('result-cats').innerHTML = s.catPlayers.map(playerItemHtml).join('');
@@ -263,6 +273,7 @@ export function create(rootEl, globalStateRef) {
     const r = s.result;
     const win = r.winner === s.myTeam && r.winner !== 'draw';
     const draw = r.winner === 'draw';
+    const personal = r.reason === 'caught' || r.reason === 'kicked';
     const accent = draw ? '#ffd700' : (win ? '#7be0a2' : '#ff6b81');
     const stats = s.myStats || {};
 
@@ -284,7 +295,7 @@ export function create(rootEl, globalStateRef) {
       ctx.fillText(text, W / 2, y);
     };
 
-    center(draw ? '🤝 平局' : (win ? '🎉 胜利！' : '😿 惜败'), 120, 56, accent, true);
+    center(personal ? '本局个人结算' : draw ? '🤝 平局' : (win ? '🎉 胜利！' : '😿 惜败'), 120, 56, accent, true);
     center(`${s.myTeam === 'cat' ? '🐱 猫队' : '🐭 鼠队'} · ${myName || '我'}`, 180, 30, '#e8eaf8', false);
 
     center(String(s.myScore), 320, 140, '#ffd700', true);
